@@ -4,7 +4,21 @@
 
 ---
 
-## 提示词
+## 一句话版
+
+最省事的用法，直接复制这一句：
+
+```
+帮我装这个 WorkBuddy 双账号切换工具 https://github.com/xianzhen2008-dotcom/wbs-auth ，装完跑 wbs init 把结果告诉我，别替我切账号。
+```
+
+这句话里已经包含了最关键的三件事：装哪个、装完要验证什么、以及不要越界替你切账号。
+
+---
+
+## 完整版
+
+想控制得更细（要求逐步汇报、异常逐条解释）就用这个：
 
 ```
 帮我安装 wbs auth —— 一个 WorkBuddy 双账号轮换的本地小工具。
@@ -89,4 +103,29 @@ wbs init
   工具内部已经处理了这个等待，所以不需要你额外做什么。
 - 快照在 ~/.workbuddy-accounts/snapshots/<名字>/，权限 700。
 - 命令：wbs（轮换）/ wbs st（状态）/ wbs s（存当前号）/ wbs init（体检）/ wbs h（详细说明）
+
+环境上的注意事项：
+
+- 只支持 macOS，别在 Linux / Windows 上试，凭证路径不一样。
+- 需要 python3 ≥ 3.8。安装脚本会自己找，包括 WorkBuddy 自带的
+  ~/.workbuddy/binaries/python/versions/*/bin/python3。
+- 如果 install.sh 报「没找到 python3」，不要自己乱装一堆东西，
+  先确认 ~/.workbuddy/binaries/python 是否被清过；
+  真要装就 xcode-select --install，别用 pip 装 python。
 ```
+
+---
+
+## 关于「任何环境」的说明
+
+不绕弯子：**不是任何环境都能用**。
+
+| 场景 | 能不能用 |
+|---|---|
+| macOS + 装了 WorkBuddy | 能，这也是唯一验证过的组合 |
+| macOS + 没装 WorkBuddy | 用不上，本工具就是给它换号的 |
+| macOS + 没有 python3 | 能。WorkBuddy 自带一个，安装脚本会自动找到并钉住 shebang |
+| Linux | 不能，凭证路径和加密后端都不同，未适配 |
+| Windows | 不能，同上 |
+
+之所以"没 python3 也能用"基本成立，是因为**目标用户必然装了 WorkBuddy**，而 WorkBuddy 自己就带 python（跑 skills 用）。所以实际卡在这个点的概率很低。

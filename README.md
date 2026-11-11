@@ -60,19 +60,13 @@ curl -fsSL https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/i
 
 ### 方式二：让 AI 帮你装
 
-把下面这段丢给 Claude Code / WorkBuddy / Cursor 等能执行命令的助手：
+一句话，丢给 Claude Code / WorkBuddy / Cursor 就行：
 
 ```
-帮我安装 wbs auth（WorkBuddy 双账号轮换工具）。
-
-1. 执行 curl -fsSL https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh | bash
-2. 装完运行 wbs init，把输出贴给我
-3. 如果 init 提示 PATH 未生效，告诉我该执行什么
-
-装好后不要替我切换账号，我自己来。
+帮我装这个 WorkBuddy 双账号切换工具 https://github.com/xianzhen2008-dotcom/wbs-auth ，装完跑 wbs init 把结果告诉我，别替我切账号。
 ```
 
-完整提示词见 [`prompts/install.md`](prompts/install.md)。
+想要更稳的版本（带校验步骤、异常处理）见 [`prompts/install.md`](prompts/install.md)。
 
 ### 方式三：手动
 
@@ -89,7 +83,16 @@ install -m 755 wbs ~/.local/bin/wbs
 chmod +x ~/.local/bin/wbs
 ```
 
-依赖：macOS + `python3` ≥ 3.8（系统自带即可）。无第三方包。
+### 环境要求
+
+- **macOS**（Windows / Linux 未适配，见[限制](#限制)）
+- **python3 ≥ 3.8**
+
+安装脚本会依次尝试：PATH 里的 `python3` → `/usr/bin/python3` → Homebrew → **WorkBuddy 自带的那个**（`~/.workbuddy/binaries/python/versions/*/bin/python3`）。装了 WorkBuddy 的机器基本都有，不用额外装。
+
+如果都没有，脚本会提示 `xcode-select --install` 或 `brew install python`。PATH 里没有 `python3` 时会自动把 shebang 钉到找到的绝对路径，装完照样能跑。
+
+无第三方包，不需要 pip。
 
 ---
 
