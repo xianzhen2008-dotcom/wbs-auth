@@ -9,7 +9,7 @@
 ## 一句话版
 
 ```
-帮我装 https://github.com/xianzhen2008-dotcom/wbs-auth 。先跑 uname -s 看你在哪：不是 Darwin 就说明你在沙箱里、别装，把该在我终端跑的命令给我；是 Darwin 就直接装，装完跑 wbs init 把结果告诉我。别替我切账号。
+帮我装 https://github.com/xianzhen2008-dotcom/wbs-auth 。先 uname -s 看你在哪：不是 Darwin 就说明在沙箱里、别装，把 README 里那条带完整性校验的安装命令给我，我自己跑；是 Darwin 就直接装，装完跑 wbs init 把结果告诉我。别替我切账号。
 ```
 
 这句包含了三件事：装什么、先判断环境、不准越界切账号。
