@@ -1,0 +1,18 @@
+# 凭证，永不入库
+*.info
+*.info.bak
+keyblob
+
+# 快照目录（如果有人把仓库放在项目里）
+snapshots/
+.workbuddy-accounts/
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/

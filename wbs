@@ -1,0 +1,941 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+wbs auth — WorkBuddy 双账号轮换
+
+WorkBuddy 的登录会话加密存在
+  ~/Library/Application Support/<产品目录>/Data/Public/auth/<channel>.info
+加密主密钥在 ~/.workbuddy/keyblob，同一台机器上所有账号共用一把，所以
+「备份 / 还原这个文件」就等于切换账号，不用重新输密码。
+
+  wbs            切到另一个号
+  wbs st         当前是哪个号
+  wbs h          详细说明
+  wbs init       新机器首次配置
+
+wbs auth 和 wbs 等价，两种写法都行。
+"""
+
+__version__ = "1.0.0"
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+HOME = Path.home()
+
+CONFIG_DIR = Path(os.environ.get("WORKBUDDY_CONFIG_DIR") or (HOME / ".workbuddy"))
+SKELETON_SNAPSHOT = CONFIG_DIR / "storage" / "skeleton" / "account-snapshot.json"
+
+STORE_DIR = Path(os.environ.get("WBS_HOME") or (HOME / ".workbuddy-accounts"))
+SNAP_DIR = STORE_DIR / "snapshots"
+
+APP_NAME = "WorkBuddy"
+AUTO_PREFIX = "_auto_"
+FALLBACK_MAC_DIR = HOME / "Library/Application Support/CodeBuddyExtension/Data/Public/auth"
+
+_TTY = sys.stdout.isatty()
+_cache = {}
+
+
+# ---------- 颜色 ----------
+def c(text, code):
+    return f"\033[{code}m{text}\033[0m" if _TTY else str(text)
+
+
+def bold(t):
+    return c(t, "1")
+
+
+def dim(t):
+    return c(t, "2")
+
+
+def green(t):
+    return c(t, "32")
+
+
+def yellow(t):
+    return c(t, "33")
+
+
+def red(t):
+    return c(t, "31")
+
+
+def cyan(t):
+    return c(t, "36")
+
+
+def fail(msg, code=1):
+    print(red("✗ ") + msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def pretty(p):
+    """把绝对路径缩成 ~/… 形式。"""
+    try:
+        rel = Path(p).relative_to(HOME)
+        return "~/" + str(rel)
+    except (ValueError, TypeError):
+        return str(p)
+
+
+# ---------- 环境探测 ----------
+def find_auth_dir():
+    """找 WorkBuddy 存凭证的目录，找不到返回 None。"""
+    env = os.environ.get("WBS_AUTH_DIR")
+    if env:
+        p = Path(os.path.expanduser(env))
+        return p if p.is_dir() else None
+
+    base = HOME / "Library/Application Support"
+    cands = []
+    if base.is_dir():
+        for d in base.glob("*/Data/Public/auth"):
+            if not d.is_dir():
+                continue
+            infos = list(d.glob("*.info"))
+            if not infos:
+                continue
+            has_wb = any("workbuddy" in f.name.lower() or "codebuddy" in f.name.lower()
+                         for f in infos)
+            newest = max((f.stat().st_mtime for f in infos), default=0)
+            cands.append((has_wb, newest, d))
+
+    if not cands:
+        return None
+    # 优先带 workbuddy/codebuddy 字样的，其次最近写过的
+    cands.sort(key=lambda x: (not x[0], -x[1]))
+    return cands[0][2]
+
+
+def auth_dir():
+    if "auth_dir" not in _cache:
+        _cache["auth_dir"] = find_auth_dir() or FALLBACK_MAC_DIR
+    return _cache["auth_dir"]
+
+
+def pick_channel():
+    """在凭证目录里选当前在用的通道：最近更新过的那个 .info。"""
+    env = os.environ.get("WBS_CHANNEL")
+    if env:
+        return env
+    if "channel" in _cache:
+        return _cache["channel"]
+    d = auth_dir()
+    cands = []
+    if d.is_dir():
+        for f in d.glob("*.info"):
+            if "observation" in f.name or f.name.endswith(".bak"):
+                continue
+            cands.append(f)
+    if cands:
+        cands.sort(key=lambda f: -f.stat().st_mtime)
+        ch = cands[0].stem
+    else:
+        ch = "workbuddy-desktop"
+    _cache["channel"] = ch
+    return ch
+
+
+def channel_path(channel=None):
+    return auth_dir() / f"{channel or pick_channel()}.info"
+
+
+def other_channels(channel=None):
+    ch = channel or pick_channel()
+    d = auth_dir()
+    if not d.is_dir():
+        return []
+    return sorted(f.stem for f in d.glob("*.info")
+                  if f.stem != ch and "observation" not in f.name)
+
+
+# ---------- 读取凭证 ----------
+def ts_to_str(ms):
+    if not ms:
+        return "-"
+    try:
+        return datetime.fromtimestamp(int(ms) / 1000).strftime("%Y-%m-%d %H:%M")
+    except (ValueError, OSError, TypeError):
+        return "-"
+
+
+def days_left(ms):
+    if not ms:
+        return None
+    try:
+        return int((int(ms) / 1000 - time.time()) // 86400)
+    except (ValueError, TypeError):
+        return None
+
+
+def read_info(channel=None):
+    p = channel_path(channel)
+    if not p.exists():
+        return None
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        fail(f"凭证文件读不了：{pretty(p)}\n  {e}")
+
+
+def account_meta(info):
+    if not info:
+        return {}
+    acc = info.get("account") or {}
+    auth = info.get("auth") or {}
+    return {
+        "uid": acc.get("uid", ""),
+        "type": acc.get("type", "") or acc.get("accountType", ""),
+        "accountType": acc.get("accountType", ""),
+        "uin": str(acc.get("uin", "") or ""),
+        "uniqueUserId": acc.get("uniqueUserId", ""),
+        "isEnterprise": bool(acc.get("isCurrentOneIdEnterprise")),
+        "isPersonal": bool(acc.get("isCurrentOneIdPersonal")),
+        "tokenExpiresAt": auth.get("expiresAt"),
+        "refreshExpiresAt": auth.get("refreshExpiresAt"),
+        "lastRefreshTime": auth.get("lastRefreshTime"),
+        "domain": auth.get("domain", ""),
+    }
+
+
+def skeleton_nickname(uid):
+    """account-snapshot.json 里昵称是明文，可以拿来显示。"""
+    try:
+        with open(SKELETON_SNAPSHOT, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        primary = d.get("primary") or {}
+        if primary.get("uid") == uid:
+            return primary.get("nickname", "") or ""
+    except (OSError, json.JSONDecodeError):
+        pass
+    return ""
+
+
+def account_history():
+    """local_storage 里的账号历史，能拿到 personal / ultimate 这类套餐名。"""
+    hist = {}
+    ls = CONFIG_DIR / "local_storage"
+    if not ls.is_dir():
+        return hist
+    for p in ls.glob("*entry_*.info"):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, list):
+            continue
+        for item in data:
+            if not isinstance(item, dict) or "key" not in item:
+                continue
+            parts = str(item["key"]).split("|")
+            if len(parts) >= 2 and parts[0] and parts[1] and parts[0] not in hist:
+                hist[parts[0]] = parts[1]
+    return hist
+
+
+def current_meta(channel=None):
+    meta = account_meta(read_info(channel))
+    if meta.get("uid"):
+        hist = account_history()
+        meta["plan"] = hist.get(meta["uid"], meta.get("type") or "")
+        meta["nickname"] = skeleton_nickname(meta["uid"])
+    return meta
+
+
+# ---------- 应用控制 ----------
+def app_running():
+    try:
+        r = subprocess.run(
+            ["osascript", "-e", f'application "{APP_NAME}" is running'],
+            capture_output=True, text=True, timeout=10,
+        )
+        return r.stdout.strip().lower() == "true"
+    except (subprocess.SubprocessError, OSError):
+        try:
+            r = subprocess.run(
+                ["pgrep", "-f", f"{APP_NAME}.app/Contents/MacOS/Electron"],
+                capture_output=True, text=True,
+            )
+            return r.returncode == 0
+        except OSError:
+            return False
+
+
+def quit_app(wait_seconds=25):
+    subprocess.run(["osascript", "-e", f'quit app "{APP_NAME}"'],
+                   capture_output=True, text=True)
+    deadline = time.time() + wait_seconds
+    while time.time() < deadline:
+        if not app_running():
+            return True
+        time.sleep(0.5)
+    return not app_running()
+
+
+def launch_app():
+    subprocess.run(["open", "-a", APP_NAME], capture_output=True, text=True)
+
+
+def app_installed():
+    return Path(f"/Applications/{APP_NAME}.app").exists()
+
+
+# ---------- 快照仓库 ----------
+def mkd(p):
+    """建目录。先判断再建，避开某些环境下 exist_ok 失效的问题。"""
+    p = Path(p)
+    if not p.is_dir():
+        p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def ensure_store():
+    mkd(STORE_DIR)
+    mkd(SNAP_DIR)
+    try:
+        os.chmod(STORE_DIR, 0o700)
+    except OSError:
+        pass
+
+
+def load_meta(name):
+    p = SNAP_DIR / name / "meta.json"
+    if not p.exists():
+        return None
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def all_snapshots(include_auto=False):
+    ensure_store()
+    out = []
+    for d in sorted(SNAP_DIR.iterdir()):
+        if not d.is_dir():
+            continue
+        if not include_auto and d.name.startswith(AUTO_PREFIX):
+            continue
+        meta = load_meta(d.name) or {}
+        meta["name"] = d.name
+        meta["auto"] = d.name.startswith(AUTO_PREFIX)
+        out.append(meta)
+    return out
+
+
+def has_snapshots():
+    """不创建目录地判断是否存过号。"""
+    if not SNAP_DIR.is_dir():
+        return False
+    return any(d.is_dir() for d in SNAP_DIR.iterdir())
+
+
+def snapshot_auth_file(name, channel=None):
+    return SNAP_DIR / name / "auth" / f"{channel or pick_channel()}.info"
+
+
+def resolve_name(name):
+    snaps = [s["name"] for s in all_snapshots(include_auto=name.startswith(AUTO_PREFIX))]
+    if not snaps:
+        fail("还没有存过任何号。先跑：wbs")
+    if name in snaps:
+        return name
+    low = name.lower()
+    for s in snaps:
+        if s.lower() == low:
+            return s
+    hits = [s for s in snaps if s.lower().startswith(low)]
+    if len(hits) == 1:
+        return hits[0]
+    if len(hits) > 1:
+        fail(f"「{name}」对上好几个：{', '.join(hits)}")
+    fail(f"没有叫「{name}」的。已有：{', '.join(snaps)}")
+
+
+def auto_name(meta):
+    plan = meta.get("plan") or meta.get("type") or "account"
+    uin = meta.get("uin") or ""
+    tail = uin[-4:] if len(uin) >= 4 else meta.get("uid", "")[:4]
+    return f"{plan}-{tail}".strip("-")
+
+
+def pick_free_name(meta, existing):
+    base = meta.get("plan") or meta.get("type") or "account"
+    if base not in existing:
+        return base
+    uin = meta.get("uin") or ""
+    if uin:
+        n = f"{base}-{uin[-4:]}"
+        if n not in existing:
+            return n
+    i = 2
+    while f"{base}{i}" in existing:
+        i += 1
+    return f"{base}{i}"
+
+
+# ---------- 显示 ----------
+def describe(meta, mark=False):
+    nick = meta.get("nickname") or ""
+    uid = meta.get("uid", "")
+    plan = meta.get("plan") or meta.get("type") or "?"
+    parts = [bold(nick) if nick else bold(uid[:8] or "?")]
+    parts.append(cyan(plan))
+    if meta.get("uin"):
+        parts.append(dim(f"uin {meta['uin']}"))
+    if uid:
+        parts.append(dim(uid[:8] + "…"))
+    line = "  ".join(parts)
+    return (green("● ") + line) if mark else line
+
+
+def short(meta):
+    nick = meta.get("nickname") or ""
+    uid = meta.get("uid", "")
+    plan = meta.get("plan") or meta.get("type") or "?"
+    return f"{nick or uid[:8]} {plan}".strip()
+
+
+def shelf_life(meta, indent="      "):
+    dl = days_left(meta.get("refreshExpiresAt"))
+    rexp = ts_to_str(meta.get("refreshExpiresAt"))
+    if dl is None:
+        return dim(f"{indent}续登至 {rexp}")
+    if dl < 0:
+        return dim(f"{indent}续登 ") + red(f"已过期（{rexp}），切回要重新登录")
+    if dl <= 7:
+        return dim(f"{indent}续登 ") + yellow(f"{dl} 天后过期（{rexp}）")
+    return dim(f"{indent}续登至 {rexp}，剩 {dl} 天")
+
+
+def show_status():
+    d = find_auth_dir()
+    if not d:
+        print(yellow("没找到 WorkBuddy 的凭证目录。"))
+        print(dim("  先在 WorkBuddy 里登录一个号，或跑 wbs init 看看。"))
+        return
+
+    meta = current_meta()
+    if not meta.get("uid"):
+        print(yellow("凭证文件存在，但没有登录信息。") + " 先在 WorkBuddy 里登录。")
+        return
+
+    print()
+    print(f"当前  {describe(meta, mark=True)}")
+    print(shelf_life(meta, "      "))
+
+    snaps = all_snapshots()
+    others = [s for s in snaps if s.get("uid") != meta.get("uid")]
+    print()
+    if len(others) == 1:
+        print(f"再跑 wbs → {describe(others[0])}")
+    elif len(others) > 1:
+        print(dim(f"另一个号有多个快照：{', '.join(s['name'] for s in others)}"))
+    elif not snaps:
+        print(dim("还没存过号。跑一次 wbs 就会自动记住当前号。"))
+    else:
+        print(dim("另一个号还没存。切过去登录一次，跑 wbs 会自动记住。"))
+    print()
+
+
+def show_list():
+    snaps = all_snapshots()
+    if not snaps:
+        print("还没存过号。跑 wbs 自动记住当前号。")
+        return
+    cur_uid = current_meta().get("uid")
+    print()
+    for s in snaps:
+        mark = s.get("uid") == cur_uid
+        print(describe(s, mark=mark))
+        print(shelf_life(s, "      "))
+        print(dim(f"      存于 {s.get('savedAt', '-')}"))
+    print()
+
+
+# ---------- 详细说明 ----------
+HELP_TEXT = """
+{b}wbs — WorkBuddy 账号轮换{/}
+
+  WorkBuddy 同一时刻只保留一个账号的登录态。这个工具把每个号的登录态各存
+  一份，用一条命令来回换，不用每次重新扫码或输密码。
+
+{b}为什么不用重新登录{/}
+
+  WorkBuddy 把会话（accessToken / refreshToken）加密存在
+    {authdir}
+  加密用的主密钥在
+    {keyblob}
+  同一台机器上所有号共用这一把锁。所以把备份的文件换回去，token 立刻
+  就能用——本质是换文件，不是伪造登录。
+
+{b}命令{/}
+
+  {c}wbs{/}              切到另一个号，切完自动打开 WorkBuddy
+  {c}wbs -y{/}           同上，不问直接切
+  {c}wbs -n{/}           只演练，看清会切成什么，不动手
+  {c}wbs -s{/}           切完不自动打开，留给自己手动开
+  {c}wbs st{/}           现在哪个号、续登还剩几天
+  {c}wbs ls{/}           已保存的号
+  {c}wbs s [名字]{/}     把当前号存下来（不给名字就按套餐自动起名）
+  {c}wbs u <名字>{/}     切到指定号（超过两个号时用）
+  {c}wbs rm <名字>{/}    删掉某个号
+  {c}wbs init{/}         体检 + 自动配置，换新电脑先跑这个
+  {c}wbs h{/}            这份说明
+
+  名字可以只打前缀，比如 {c}wbs u per{/} 就够。
+
+{b}第一次怎么配{/}
+
+  1. 正常登录个人号，终端跑 {c}wbs s{/}        → 存成 personal
+  2. 在 WorkBuddy 里登出，登录企业号
+  3. 再跑 {c}wbs{/}                              → 自动记住企业号，且不会把你弹回去
+  4. 之后 {c}wbs{/} 就是来回切
+
+  第 3 步之所以不切走，是因为你刚登进来，直接弹回去很别扭。再跑一次才轮到轮换。
+
+{b}每天怎么用{/}
+
+  {c}wbs{/}         换个号
+  {c}wbs -y{/}      连确认都不要，一条命令到底
+
+{b}换新电脑{/}
+
+  把 {c}~/.workbuddy-accounts{/} 整个拷过去，然后
+    {c}wbs init{/}    自动找凭证、认账号、建仓库
+    {c}wbs -y{/}      开始切
+
+{b}几个要注意的{/}
+
+  · 切换会退出 WorkBuddy，正在跑的对话会断。
+  · 必须等它完全退出再换文件，否则它退出时会把内存里的旧会话写回去，
+    白切一次。工具已经处理了这个等待。
+  · 快照里是加密过的 token，但能被别人直接拿去用。仓库权限设成 700，
+    别拷给别人、别丢公共目录。
+  · 快照的续登凭证一般 60 天有效，{c}wbs st{/} 里能看到剩几天。过期了切
+    回去要重新登录，重新登录后跑一次 {c}wbs s{/} 刷新。
+
+{b}文件在哪{/}
+
+  凭证    {authdir}
+  快照    {snapdir}
+  主密钥  {keyblob}
+"""
+
+
+def show_help():
+    t = HELP_TEXT
+    t = t.replace("{b}", "\033[1m" if _TTY else "")
+    t = t.replace("{/}", "\033[0m" if _TTY else "")
+    t = t.replace("{c}", "\033[36m" if _TTY else "")
+    t = t.replace("{authdir}", pretty(auth_dir()) if find_auth_dir() else "（未找到，先登录 WorkBuddy）")
+    t = t.replace("{snapdir}", pretty(STORE_DIR))
+    t = t.replace("{keyblob}", pretty(CONFIG_DIR / "keyblob"))
+    print(t)
+
+
+# ---------- 保存 / 切换 ----------
+def do_save(name=None, channel=None, quiet=False):
+    channel = channel or pick_channel()
+    p = channel_path(channel)
+    if not p.exists():
+        fail(f"找不到凭证：{pretty(p)}\n  先在 WorkBuddy 里登录。")
+
+    meta = account_meta(read_info(channel))
+    if not meta.get("uid"):
+        fail("凭证里没有账号信息，当前可能已登出。")
+
+    hist = account_history()
+    meta["plan"] = hist.get(meta["uid"], meta.get("type") or "")
+    meta["nickname"] = skeleton_nickname(meta["uid"])
+    meta["channel"] = channel
+    meta["savedAt"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if not name:
+        # 这个号已经存过就复用原来的名字，别存出第二份
+        existing = [s for s in all_snapshots() if s.get("uid") == meta["uid"]]
+        if existing:
+            name = existing[0]["name"]
+        else:
+            name = pick_free_name(meta, {s["name"] for s in all_snapshots(include_auto=True)})
+
+    ensure_store()
+    dest = SNAP_DIR / name
+    mkd(dest)
+    mkd(dest / "auth")
+
+    old = load_meta(name)
+    if old and old.get("uid") and old["uid"] != meta["uid"] and not quiet:
+        print(yellow(f"⚠ 「{name}」原本是 {old.get('uid','')[:8]}，将被覆盖"))
+
+    shutil.copy2(p, snapshot_auth_file(name, channel))
+    os.chmod(snapshot_auth_file(name, channel), 0o600)
+
+    if SKELETON_SNAPSHOT.exists():
+        shutil.copy2(SKELETON_SNAPSHOT, dest / "account-snapshot.json")
+
+    with open(dest / "meta.json", "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+
+    if not quiet:
+        print(green("✓ ") + f"已存为 {bold(name)}  " + dim(f"({short(meta)})"))
+    return name, meta
+
+
+def do_switch(name, assume_yes=False, restart=True, channel=None, dry_run=False):
+    channel = channel or pick_channel()
+    name = resolve_name(name)
+    meta = load_meta(name) or {}
+    src = snapshot_auth_file(name, channel)
+    if not src.exists():
+        fail(f"快照 {name} 里没有 {channel}.info，这个快照是从别的通道存的。")
+
+    cur = current_meta(channel)
+    if cur.get("uid") == meta.get("uid"):
+        print(dim(f"已经是 {short(meta)} 了。"))
+        return
+
+    if dry_run:
+        print()
+        print(f"  {describe(cur) if cur.get('uid') else '（未登录）'}")
+        print(dim("        ↓"))
+        print(f"  {describe(meta)}")
+        print(dim(f"  会先退出 {APP_NAME}，换掉凭证，再启动"))
+        print()
+        return
+
+    if not assume_yes:
+        if not sys.stdin.isatty():
+            fail("非交互环境，加 -y 确认后重跑。")
+        running = app_running()
+        tail = f"（会退出 {APP_NAME}）" if running else ""
+        print()
+        print(f"  {describe(cur) if cur.get('uid') else '（未登录）'}  →  {describe(meta)}{tail}")
+        try:
+            ans = input("  切换？[Y/n] ").strip().lower()
+        except EOFError:
+            ans = "n"
+        if ans in ("n", "no"):
+            fail("已取消。")
+
+    # 兜底备份即将被切走的号
+    if cur.get("uid"):
+        bdir = SNAP_DIR / (AUTO_PREFIX + auto_name(cur))
+        mkd(bdir)
+        mkd(bdir / "auth")
+        shutil.copy2(channel_path(channel), bdir / "auth" / f"{channel}.info")
+        os.chmod(bdir / "auth" / f"{channel}.info", 0o600)
+        cur["channel"] = channel
+        cur["savedAt"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(bdir / "meta.json", "w", encoding="utf-8") as f:
+            json.dump(cur, f, ensure_ascii=False, indent=2)
+
+    if app_running():
+        print(dim("  退出中…"), end="", flush=True)
+        if not quit_app():
+            print()
+            fail(f"{APP_NAME} 没退出成功，手动退出后再试。")
+        print(dim(" 完成"))
+
+    dst = channel_path(channel)
+    mkd(dst.parent)
+    if dst.exists():
+        shutil.copy2(dst, str(dst) + ".bak")
+    shutil.copy2(src, dst)
+    os.chmod(dst, 0o600)
+
+    snap_src = SNAP_DIR / name / "account-snapshot.json"
+    if snap_src.exists():
+        mkd(SKELETON_SNAPSHOT.parent)
+        shutil.copy2(snap_src, SKELETON_SNAPSHOT)
+
+    if restart:
+        time.sleep(0.5)
+        launch_app()
+        print(green("✓ ") + f"已切到 {describe(meta)}" + dim("  启动中"))
+    else:
+        print(green("✓ ") + f"已切到 {describe(meta)}")
+        print(dim(f"  open -a {APP_NAME}"))
+
+
+def cmd_toggle(assume_yes=False, dry_run=False, restart=True, channel=None):
+    channel = channel or pick_channel()
+    cur = current_meta(channel)
+    if not cur.get("uid"):
+        return cmd_init()
+
+    snaps = all_snapshots()
+    mine = [s for s in snaps if s.get("uid") == cur["uid"]]
+
+    just_learned = False
+    if not mine:
+        saved, _ = do_save(None, channel, quiet=True)
+        print()
+        print(f"当前  {describe(cur, mark=True)}")
+        print(dim(f"  新号，已记作 {saved}"))
+        snaps = all_snapshots()
+        mine = [s for s in snaps if s.get("uid") == cur["uid"]]
+        just_learned = True
+
+    others = [s for s in snaps if s.get("uid") != cur["uid"]]
+    if not others:
+        print()
+        print(f"当前  {describe(cur, mark=True)}")
+        print()
+        print(dim("  只认得这一个号。"))
+        print(dim("  切到另一个号登录一次，之后跑 wbs 它会自动记住。"))
+        print()
+        return
+
+    if just_learned:
+        print(dim(f"  两个号都记好了，再跑 wbs 就切到 {describe(others[0])}"))
+        print()
+        return
+
+    if len(others) > 1:
+        print(yellow(f"另一个号存了多个快照：{', '.join(s['name'] for s in others)}"))
+        print(dim("  用 wbs u <名字> 指定切哪个。"))
+        return
+
+    do_switch(others[0]["name"], assume_yes, restart, channel, dry_run)
+
+
+# ---------- 初始化 ----------
+def bin_on_path():
+    target = (HOME / ".local" / "bin").resolve()
+    for p in os.environ.get("PATH", "").split(":"):
+        if not p:
+            continue
+        try:
+            if Path(os.path.expanduser(p)).resolve() == target:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _pad(s, width=9):
+    """按显示宽度补空格，中文算 2 格。"""
+    w = sum(2 if ord(ch) > 0x2E80 else 1 for ch in s)
+    return s + " " * max(0, width - w)
+
+
+def row(label, value, ok=True, note=""):
+    mark = green("✓") if ok is True else (yellow("!") if ok is None else red("✗"))
+    line = f"  {mark} {_pad(label)}{value}"
+    if note:
+        line += "  " + dim(note)
+    print(line)
+
+
+def cmd_init(silent_if_ready=False):
+    print(bold("\nWorkBuddy 账号轮换 · 环境配置"))
+    print(dim("─" * 62))
+
+    problems = []
+
+    # 1 应用
+    if app_installed():
+        row("应用", f"{APP_NAME}.app")
+    else:
+        row("应用", "没装", False)
+        problems.append("没找到 /Applications/WorkBuddy.app")
+
+    # 2 凭证目录
+    d = find_auth_dir()
+    if d:
+        row("凭证目录", pretty(d))
+    else:
+        row("凭证目录", "没找到", None, "先在 WorkBuddy 里登录")
+        problems.append("没检测到凭证目录")
+        print()
+        print(dim("  先打开 WorkBuddy 登录一个账号，再回来跑 wbs init。"))
+        print()
+        return
+
+    # 3 通道
+    ch = pick_channel()
+    chp = d / f"{ch}.info"
+    if chp.exists():
+        mtime = datetime.fromtimestamp(chp.stat().st_mtime).strftime("%m-%d %H:%M")
+        extra = other_channels(ch)
+        note = f"{mtime} 更新"
+        if extra:
+            note += f"，另有 {', '.join(extra)}"
+        row("当前通道", ch, True, note)
+
+    # 4 登录账号
+    meta = current_meta(ch)
+    if meta.get("uid"):
+        row("登录账号", short(meta), True, f"uin {meta['uin']}" if meta.get("uin") else "")
+        dl = days_left(meta.get("refreshExpiresAt"))
+        note = "已过期" if (dl is not None and dl < 0) else (
+            f"剩 {dl} 天" if dl is not None else "")
+        row("续登凭证", ts_to_str(meta.get("refreshExpiresAt")), True, note)
+        if dl is not None and dl < 0:
+            problems.append("当前号的续登凭证已过期，建议重新登录一次")
+    else:
+        row("登录账号", "未登录", None, "在 WorkBuddy 里登录一个号")
+        problems.append("凭证文件里没有账号，可能已登出")
+
+    # 5 快照仓库
+    existed = STORE_DIR.exists()
+    ensure_store()
+    n = len(all_snapshots(include_auto=True))
+    row("快照仓库", pretty(STORE_DIR), True, ("已有 " if existed else "已创建 ") + f"{n} 份")
+
+    # 6 命令入口
+    if bin_on_path():
+        row("命令路径", pretty(HOME / ".local" / "bin"), True, "已在 PATH")
+    else:
+        row("命令路径", pretty(HOME / ".local" / "bin"), None, "不在 PATH")
+        problems.append(f'把 export PATH="$HOME/.local/bin:$PATH" 加进 ~/.zshrc')
+
+    # 7 自动保存当前号
+    print(dim("─" * 62))
+    if not meta.get("uid"):
+        print(dim("  没有可保存的账号，跳过。"))
+        print()
+        return
+
+    snaps = all_snapshots()
+    mine = [s for s in snaps if s.get("uid") == meta["uid"]]
+    if mine:
+        print(green("✓ ") + f"当前号已存过：{bold(mine[0]['name'])}  " + dim(f"({short(meta)})"))
+    else:
+        name, saved = do_save(None, ch, quiet=True)
+        print(green("✓ ") + f"已自动保存当前号：{bold(name)}  " + dim(f"({short(saved)})"))
+
+    snaps = all_snapshots()
+    others = [s for s in snaps if s.get("uid") != meta["uid"]]
+
+    # 下一步
+    print()
+    print(bold("下一步"))
+    if len(others) == 1:
+        print(f"  跑 {cyan('wbs')} 切到 {describe(others[0])}")
+        print(dim("  两个号都在了，以后 wbs 就是来回切。"))
+    elif len(others) > 1:
+        print(f"  已存 {len(others)} 个其他号，用 {cyan('wbs u <名字>')} 指定")
+        print(dim(f"  {', '.join(s['name'] for s in others)}"))
+    else:
+        print(f"  1. 在 WorkBuddy 里登出，登录另一个号")
+        print(f"  2. 回来跑 {cyan('wbs')}  " + dim("它会自动记住，不会把你弹回去"))
+        print(f"  3. 之后再跑 {cyan('wbs')} 就开始来回切了")
+
+    if problems:
+        print()
+        print(bold("待处理"))
+        for p in problems:
+            print("  " + yellow("· ") + p)
+    print()
+
+
+def cmd_rm(name):
+    name = resolve_name(name)
+    shutil.rmtree(SNAP_DIR / name)
+    print(green("✓ ") + f"删掉 {name}")
+
+
+def cmd_rename(old, new):
+    old = resolve_name(old)
+    if (SNAP_DIR / new).exists():
+        fail(f"「{new}」已存在。")
+    (SNAP_DIR / old).rename(SNAP_DIR / new)
+    meta = load_meta(new) or {}
+    meta["name"] = new
+    with open(SNAP_DIR / new / "meta.json", "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+    print(green("✓ ") + f"{old} → {new}")
+
+
+# ---------- 入口 ----------
+def main():
+    argv = sys.argv[1:]
+    # 支持 `wbs auth ...` 与 `wbs ...` 两种写法
+    if argv and argv[0] == "auth":
+        argv = argv[1:]
+
+    ap = argparse.ArgumentParser(
+        prog="wbs",
+        add_help=False,
+        description="WorkBuddy 账号轮换",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="详细说明：wbs h",
+    )
+    ap.add_argument("-h", "--help", action="store_true", help="显示用法")
+    ap.add_argument("-v", "--version", action="version",
+                    version=f"wbs auth {__version__}")
+    ap.add_argument("-y", "--yes", action="store_true", help="不确认，直接切")
+    ap.add_argument("-n", "--dry-run", action="store_true", help="只看不切")
+    ap.add_argument("-s", "--stay", action="store_true", help="切完不自动打开")
+
+    sub = ap.add_subparsers(dest="cmd")
+    sub.add_parser("st", aliases=["status"], add_help=False, help="当前账号")
+    sub.add_parser("ls", aliases=["list"], add_help=False, help="已保存的账号")
+    sub.add_parser("h", aliases=["help"], add_help=False, help="详细说明")
+    sub.add_parser("init", add_help=False, help="体检并自动配置")
+
+    p_save = sub.add_parser("s", aliases=["save"], add_help=False, help="保存当前账号")
+    p_save.add_argument("name", nargs="?")
+
+    p_use = sub.add_parser("u", aliases=["use"], add_help=False, help="切到指定账号")
+    p_use.add_argument("name")
+    p_use.add_argument("-y", "--yes", action="store_true")
+    p_use.add_argument("-n", "--dry-run", action="store_true")
+    p_use.add_argument("-s", "--stay", action="store_true")
+
+    p_rm = sub.add_parser("rm", add_help=False, help="删除快照")
+    p_rm.add_argument("name")
+
+    p_rn = sub.add_parser("rename", add_help=False, help="重命名快照")
+    p_rn.add_argument("old")
+    p_rn.add_argument("new")
+
+    args = ap.parse_args(argv)
+
+    if args.help:
+        print(__doc__.strip())
+        return
+
+    if args.cmd is None:
+        if not has_snapshots():
+            return cmd_init()
+        return cmd_toggle(args.yes, args.dry_run, restart=not args.stay)
+
+    if args.cmd in ("st", "status"):
+        show_status()
+    elif args.cmd in ("ls", "list"):
+        show_list()
+    elif args.cmd in ("h", "help"):
+        show_help()
+    elif args.cmd == "init":
+        cmd_init()
+    elif args.cmd in ("s", "save"):
+        do_save(args.name)
+    elif args.cmd in ("u", "use"):
+        do_switch(args.name, args.yes, restart=not args.stay, dry_run=args.dry_run)
+    elif args.cmd == "rm":
+        cmd_rm(args.name)
+    elif args.cmd == "rename":
+        cmd_rename(args.old, args.new)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print()
+        sys.exit(130)
