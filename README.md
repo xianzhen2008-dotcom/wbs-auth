@@ -55,7 +55,7 @@ WorkBuddy 把当前登录会话加密存在一个文件里：
 ```bash
 curl -fL --retry 3 --connect-timeout 15 -o /tmp/wbs-install.sh \
   https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh \
-  && bash /tmp/wbs-install.sh
+  && tail -3 /tmp/wbs-install.sh | grep -q WBS_AUTH_INSTALLER_END && bash /tmp/wbs-install.sh
 ```
 
 > **别用 `curl ... | bash`。** 网络抖一下，管道会把半截脚本喂给 bash，结果是几行 `syntax error` 加一个装了一半的残缺文件，还特别难看出发生了什么。先落盘、再执行，就没有这个问题。
@@ -65,7 +65,7 @@ curl -fL --retry 3 --connect-timeout 15 -o /tmp/wbs-install.sh \
 ```bash
 curl -fL --retry 3 -o /tmp/wbs-install.sh \
   https://cdn.jsdelivr.net/gh/xianzhen2008-dotcom/wbs-auth@main/install.sh \
-  && bash /tmp/wbs-install.sh
+  && tail -3 /tmp/wbs-install.sh | grep -q WBS_AUTH_INSTALLER_END && bash /tmp/wbs-install.sh
 ```
 
 装到 `~/.local/bin/wbs`，顺带建 `wbs-auth` 别名，并自动跑一次环境检查。脚本内部下载主程序时也会在 raw 不通时自动切备用源。
@@ -83,7 +83,7 @@ curl -fL --retry 3 -o /tmp/wbs-install.sh \
 > 这时让它把命令给你，**自己在终端里粘一下**就行：
 >
 > ```bash
-> curl -fL --retry 3 -o /tmp/wbs-install.sh https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh && bash /tmp/wbs-install.sh
+> curl -fL --retry 3 -o /tmp/wbs-install.sh https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh && tail -3 /tmp/wbs-install.sh | grep -q WBS_AUTH_INSTALLER_END && bash /tmp/wbs-install.sh
 > ```
 >
 > 详细说明见 [`prompts/install.md`](prompts/install.md)，里面有沙箱环境的排查步骤。
@@ -247,7 +247,7 @@ wbs --version
 ```bash
 curl -fL --retry 3 --connect-timeout 15 -o /tmp/wbs-install.sh \
   https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh \
-  && bash /tmp/wbs-install.sh
+  && tail -3 /tmp/wbs-install.sh | grep -q WBS_AUTH_INSTALLER_END && bash /tmp/wbs-install.sh
 ```
 
 如果 `wbs` 命令已经坏了，上面那条 `sed` 也能先救回来。

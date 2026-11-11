@@ -3,7 +3,12 @@
 #
 #   curl -fL --retry 3 -o /tmp/wbs-install.sh \
 #     https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh \
+#     && tail -3 /tmp/wbs-install.sh | grep -q WBS_AUTH_INSTALLER \
 #     && bash /tmp/wbs-install.sh
+#
+# 文件最后一行是个完整性标记（WBS_AUTH 开头、END 结尾的那条注释）。网络断掉
+# 时下载会缺一截，校验不到它就不执行，免得把半截脚本喂给 bash（那会报
+# syntax error 并且装出个残缺文件）。复制粘贴时也把它带上，别掐掉。
 #
 # 也支持本地安装：
 #   ./install.sh
@@ -48,7 +53,7 @@ case "$OS" in
     say "  请打开你自己电脑的「终端 / Terminal」，粘这一行："
     say ""
     say "    ${c_dim}curl -fL --retry 3 -o /tmp/wbs-install.sh $REPO_RAW/install.sh${c_reset}"
-    say "    ${c_dim}bash /tmp/wbs-install.sh${c_reset}"
+    say "    ${c_dim}tail -3 /tmp/wbs-install.sh | grep -q WBS_AUTH_INSTALLER_END && bash /tmp/wbs-install.sh${c_reset}"
     say ""
     say "  如果你本来就在 Linux 或 Windows 上，那确实不支持——"
     say "  凭证路径和加密方式都不一样，需要另行适配，不是加个判断就能跑。"
@@ -249,3 +254,5 @@ fi
 say "${c_dim}────────────────────────────────────────${c_reset}"
 ok "装完了。敲 ${c_dim}wbs${c_reset} 看用法，${c_dim}wbs h${c_reset} 看详细说明"
 say ""
+
+# WBS_AUTH_INSTALLER_END
