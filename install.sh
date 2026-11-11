@@ -66,7 +66,24 @@ if [ ! -d "$HOME/Library/Application Support" ] && [ ! -d "$HOME/.workbuddy" ]; 
 fi
 
 # --- Python ---
-# 依次找工作 python3、系统 python3、Homebrew、WorkBuddy 自带的那个
+# /usr/bin/python3 在没装 Xcode 命令行工具的 Mac 上只是个 shim：
+# 文件存在、可执行，但真跑起来会弹「安装开发者工具」对话框然后失败。
+# 所以不能只看 -x，得先确认 CLT 装了没有。
+clt_installed() {
+  xcode-select -p >/dev/null 2>&1
+}
+
+# 某个路径的 python 是不是那个要 CLT 的 shim
+is_clt_shim() {
+  case "$1" in
+    /usr/bin/python3) return 0 ;;
+  esac
+  # 也挡住软链到它的（如 /usr/local/bin/python3 -> /usr/bin/python3）
+  local real
+  real="$(readlink -f "$1" 2>/dev/null || true)"
+  [ "$real" = "/usr/bin/python3" ]
+}
+
 find_python() {
   local c
   for c in \
@@ -78,7 +95,11 @@ find_python() {
     "$HOME"/.local/bin/python3
   do
     [ -n "$c" ] && [ -x "$c" ] || continue
-    if "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' 2>/dev/null; then
+    # 没有 CLT 就别去碰那个 shim，一执行就弹窗
+    if is_clt_shim "$c" && ! clt_installed; then
+      continue
+    fi
+    if "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' >/dev/null 2>&1; then
       printf '%s' "$c"
       return 0
     fi
@@ -128,18 +149,31 @@ fi
 "$PY" -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$TMP" \
   || die "下载到的 wbs 语法有问题，可能被改坏了"
 
-# PATH 里没有 python3 时，把 shebang 钉成刚找到的绝对路径，否则 wbs 跑不起来
-if ! command -v python3 >/dev/null 2>&1; then
+# --- shebang ---
+# `command -v python3` 在有 CLT shim 的机器上永远成功，拿它判断等于没判断。
+# 真正要问的是：PATH 里那个 python3 敲下去能不能跑起来。
+path_python_usable() {
+  local p
+  p="$(command -v python3 2>/dev/null || true)"
+  [ -n "$p" ] || return 1
+  if is_clt_shim "$p" && ! clt_installed; then
+    return 1
+  fi
+  "$p" -c 'pass' >/dev/null 2>&1
+}
+
+if [ "${WBS_FORCE_PIN_SHEBANG:-0}" = "1" ] || ! path_python_usable; then
   "$PY" - "$TMP" "$PY" <<'PYEOF'
 import sys
 path, py = sys.argv[1], sys.argv[2]
 src = open(path, encoding="utf-8").read()
 if src.startswith("#!"):
-    head, rest = src.split("\n", 1)
-    src = f"#!{py}\n{rest}"
-    open(path, "w", encoding="utf-8").write(src)
+    _, rest = src.split("\n", 1)
+    open(path, "w", encoding="utf-8").write(f"#!{py}\n{rest}")
 PYEOF
-  ok "已把解释器钉到 $PY"
+  ok "已把解释器钉到 ${PY}"
+else
+  ok "PATH 里的 python3 可用，保持便携写法"
 fi
 
 # --- 安装 ---

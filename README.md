@@ -215,6 +215,22 @@ WorkBuddy 没登录，或者装在了非标准位置。先在 WorkBuddy 里登�
 
 大概率是 WorkBuddy 没退干净就被覆盖了。确认退出后再跑一次，`wbs` 会等进程真正结束。
 
+**运行 `wbs` 弹出一堆 `xcode-select: note: No developer tools were found`？**
+
+安装时装到了系统那个「假」python3（`/usr/bin/python3` 只是个壳，没装 Xcode 命令行工具时跑起来就弹这个）。重跑一次安装就会自动修好：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh | bash
+```
+
+或者手动把解释器钉死：
+
+```bash
+PY=$(ls -d ~/.workbuddy/binaries/python/versions/*/bin/python3 2>/dev/null | tail -1)
+[ -n "$PY" ] && sed -i '' "1s|.*|#!$PY|" ~/.local/bin/wbs
+wbs --version
+```
+
 **会不会影响公司电脑的合规监控？**
 
 不知道，请自行判断。这工具只操作本地登录文件，不改变 WorkBuddy 本身的任何行为。
