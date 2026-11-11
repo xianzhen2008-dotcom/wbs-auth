@@ -29,10 +29,41 @@ say "wbs auth · 安装"
 say "${c_dim}────────────────────────────────────────${c_reset}"
 
 # --- 平台 ---
-case "$(uname -s)" in
+OS="$(uname -s)"
+case "$OS" in
   Darwin) ;;
-  *) die "目前只支持 macOS。Linux / Windows 还没适配凭证路径。" ;;
+  *)
+    warn "当前系统是 ${OS}，不是 macOS"
+    say ""
+    if [ -f /.dockerenv ] || [ -n "${CODESPACES:-}" ] || [ -n "${REMOTE_CONTAINERS:-}" ] \
+       || [ -n "${KUBERNETES_SERVICE_HOST:-}" ]; then
+      say "  看起来你正跑在一个容器里。"
+      say ""
+    fi
+    say "  ${c_yellow}如果这是 AI 助手给你的沙箱环境，那它不是你自己的电脑。${c_reset}"
+    say "  沙箱里装上了也看不到你机器上 WorkBuddy 的登录文件，切换无从谈起。"
+    say ""
+    say "  请打开你自己电脑的「终端 / Terminal」，粘这一行："
+    say ""
+    say "    ${c_dim}curl -fsSL $REPO_RAW/install.sh | bash${c_reset}"
+    say ""
+    say "  如果你本来就在 Linux 或 Windows 上，那确实不支持——"
+    say "  凭证路径和加密方式都不一样，需要另行适配，不是加个判断就能跑。"
+    say ""
+    exit 1
+    ;;
 esac
+
+# --- 确认拿到的是真实宿主环境 ---
+# 沙箱里可能 uname 也报 Darwin，但看不到凭证目录，提前说清楚比装完才发现好
+if [ ! -d "$HOME/Library/Application Support" ] && [ ! -d "$HOME/.workbuddy" ]; then
+  warn "看不到 macOS 的用户目录（$HOME/Library/Application Support）"
+  say ""
+  say "  可能是在受限沙箱里执行。请在你自己的终端里重跑，"
+  say "  或者先确认 WorkBuddy 已经在这台机器上登录过。"
+  say ""
+  exit 1
+fi
 
 # --- Python ---
 # 依次找工作 python3、系统 python3、Homebrew、WorkBuddy 自带的那个

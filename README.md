@@ -63,10 +63,18 @@ curl -fsSL https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/i
 一句话，丢给 Claude Code / WorkBuddy / Cursor 就行：
 
 ```
-帮我装这个 WorkBuddy 双账号切换工具 https://github.com/xianzhen2008-dotcom/wbs-auth ，装完跑 wbs init 把结果告诉我，别替我切账号。
+帮我装 https://github.com/xianzhen2008-dotcom/wbs-auth 。先跑 uname -s 看你在哪：不是 Darwin 就说明你在沙箱里、别装，把该在我终端跑的命令给我；是 Darwin 就直接装，装完跑 wbs init 把结果告诉我。别替我切账号。
 ```
 
-想要更稳的版本（带校验步骤、异常处理）见 [`prompts/install.md`](prompts/install.md)。
+> **如果 AI 说「沙箱 Linux 环境无法安装」**，那是正常现象，不是工具坏了。
+> 多数 AI 的命令执行跑在隔离容器里，容器看不到你 Mac 上的 WorkBuddy 登录文件。
+> 这时让它把命令给你，**自己在终端里粘一下**就行：
+>
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh | bash
+> ```
+>
+> 详细说明见 [`prompts/install.md`](prompts/install.md)，里面有沙箱环境的排查步骤。
 
 ### 方式三：手动
 
@@ -86,6 +94,7 @@ chmod +x ~/.local/bin/wbs
 ### 环境要求
 
 - **macOS**（Windows / Linux 未适配，见[限制](#限制)）
+- **原生终端**，不要在 Docker、容器或 AI 沙箱里装——那些环境看不到你机器上的凭证
 - **python3 ≥ 3.8**
 
 安装脚本会依次尝试：PATH 里的 `python3` → `/usr/bin/python3` → Homebrew → **WorkBuddy 自带的那个**（`~/.workbuddy/binaries/python/versions/*/bin/python3`）。装了 WorkBuddy 的机器基本都有，不用额外装。

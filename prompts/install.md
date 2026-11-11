@@ -2,56 +2,96 @@
 
 把下面整段内容发给能执行终端命令的 AI 助手（Claude Code / WorkBuddy / Cursor / Codex 等）。
 
+> **重要前提**：这个工具要读写你**本机** WorkBuddy 的登录文件。如果 AI 跑在隔离沙箱（常见于云端 Agent、Linux 容器）里，它看不到你机器上的文件，装了也没用。下面第一版提示词会让 AI 自己判断这件事。
+
 ---
 
 ## 一句话版
 
-最省事的用法，直接复制这一句：
-
 ```
-帮我装这个 WorkBuddy 双账号切换工具 https://github.com/xianzhen2008-dotcom/wbs-auth ，装完跑 wbs init 把结果告诉我，别替我切账号。
+帮我装 https://github.com/xianzhen2008-dotcom/wbs-auth 。先跑 uname -s 看你在哪：不是 Darwin 就说明你在沙箱里、别装，把该在我终端跑的命令给我；是 Darwin 就直接装，装完跑 wbs init 把结果告诉我。别替我切账号。
 ```
 
-这句话里已经包含了最关键的三件事：装哪个、装完要验证什么、以及不要越界替你切账号。
+这句包含了三件事：装什么、先判断环境、不准越界切账号。
 
 ---
 
 ## 完整版
 
-想控制得更细（要求逐步汇报、异常逐条解释）就用这个：
+想控制得更细（要求逐步汇报、异常逐条解释）用这个：
 
-```
-帮我安装 wbs auth —— 一个 WorkBuddy 双账号轮换的本地小工具。
-
+``` 
+帮我安装 wbs auth —— 一个 WorkBuddy 双账号轮换的本地工具。
 仓库：https://github.com/xianzhen2008-dotcom/wbs-auth
 
-请按顺序做，每步把结果告诉我：
+第一步，先确认你运行在什么环境，别急着装：
 
-1. 确认环境
-   - 确认是 macOS（uname -s 输出 Darwin）
-   - 确认有 python3，且版本 ≥ 3.8
-   - 不满足就告诉我缺什么，先别继续
+1. 执行 uname -s
+   - 结果不是 Darwin：你在我 AI 助手的沙箱里，不是我的电脑。
+     直接告诉我"我在沙箱里装不了"，然后把下面这行命令原样给我，
+     让我自己在终端里跑：
+       curl -fsSL https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh | bash
+     不要尝试绕过，不要试图映射路径，不要装到沙箱里。
+   - 结果是 Darwin：继续下一步。
 
-2. 安装
+2. 再确认能不能看到我的真实用户目录：
+   执行 ls -d "$HOME/Library/Application Support" "$HOME/.workbuddy"
+   - 两个都不存在：说明还是受限环境，同样把命令给我，别装。
+   - 至少一个存在：正常，可以装。
+
+3. 安装（仅当上面两步都通过）
    执行：curl -fsSL https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh | bash
 
-3. 体检
+4. 体检
    执行：wbs init
    把完整输出贴给我，不要省略。
 
-4. 如果 init 里出现任何 ✗ 或 ! 项
+5. 如果 init 里有任何 ✗ 或 !
    - 逐条解释是什么意思
-   - PATH 没生效就告诉我该 source 哪个文件
+   - PATH 没生效就告诉我 source 哪个文件
    - 找不到凭证目录就告诉我先去 WorkBuddy 登录
 
-5. 告诉我下一步
+6. 告诉我下一步
 
 约束：
-- 不要替我切换账号，也不要执行 wbs / wbs -y。切换会退出 WorkBuddy，我得自己决定时机。
+- 不要替我切换账号，也不要执行 wbs / wbs -y。切换会退出 WorkBuddy，时机我自己定。
 - 不要修改 ~/.workbuddy 下的任何东西。
-- 不要读取或打印 ~/.workbuddy-accounts 里 .info 文件的内容，里面有凭证。
-- 装完只要告诉我：装在哪、当前认到几个号、下一步该做什么。
+- 不要读取或打印 ~/.workbuddy-accounts 里 .info 的内容，里面有凭证。
+- 不要在沙箱里"变通"安装——路径对不上，装了也是废的。
 ```
+
+---
+
+## 如果 AI 说"沙箱 Linux 环境无法安装"
+
+这是正常现象，不是工具的问题。
+
+多数 AI 助手的命令执行跑在隔离容器里（Linux），和你自己的 Mac 是两个世界：
+
+- 容器里 `uname -s` 返回 `Linux`
+- 容器里没有 `~/Library/Application Support/CodeBuddyExtension`
+- 容器里装的东西，会话结束就没了
+
+而 `wbs` 的全部价值就是操作**你本机**那个加密的登录文件。所以：
+
+**打开你自己电脑的「终端 / Terminal」，粘这一行就行：**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh | bash
+```
+
+不需要 AI 参与，装完直接能用。想让它帮你解读输出，把结果贴回去问它。
+
+### 如果你的 AI 确实跑在本机
+
+有些配置下（比如本地 CLI 版 Claude Code、关掉沙箱的 WorkBuddy），AI 就是在你的 Mac 上执行命令。判断方法：
+
+```bash
+uname -s                              # Darwin
+ls -d ~/Library/Application\ Support   # 存在
+```
+
+两条都满足，让它装没问题。我这台就是这么装的。
 
 ---
 
@@ -80,17 +120,6 @@ WorkBuddy 账号轮换 · 环境配置
 
 ---
 
-## 如果你不想让 AI 装
-
-两条命令等价：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh | bash
-wbs init
-```
-
----
-
 ## 给 AI 的补充上下文（可选，贴在上面提示词后面）
 
 ```
@@ -106,7 +135,8 @@ wbs init
 
 环境上的注意事项：
 
-- 只支持 macOS，别在 Linux / Windows 上试，凭证路径不一样。
+- 只支持 macOS 原生环境，别在 Linux / Windows 上试，凭证路径和加密方式都不同。
+- 不要在容器或沙箱里装，那些环境看不到宿主机文件，装了没有意义。
 - 需要 python3 ≥ 3.8。安装脚本会自己找，包括 WorkBuddy 自带的
   ~/.workbuddy/binaries/python/versions/*/bin/python3。
 - 如果 install.sh 报「没找到 python3」，不要自己乱装一堆东西，
@@ -122,10 +152,14 @@ wbs init
 
 | 场景 | 能不能用 |
 |---|---|
-| macOS + 装了 WorkBuddy | 能，这也是唯一验证过的组合 |
+| macOS 本机终端 | 能，唯一验证过的组合 |
+| macOS 本机 + AI 跑在本机 | 能，AI 可以直接装 |
+| macOS + AI 跑在 Linux 沙箱 | 不能。让 AI 把命令给你，自己终端跑 |
 | macOS + 没装 WorkBuddy | 用不上，本工具就是给它换号的 |
 | macOS + 没有 python3 | 能。WorkBuddy 自带一个，安装脚本会自动找到并钉住 shebang |
 | Linux | 不能，凭证路径和加密后端都不同，未适配 |
 | Windows | 不能，同上 |
 
 之所以"没 python3 也能用"基本成立，是因为**目标用户必然装了 WorkBuddy**，而 WorkBuddy 自己就带 python（跑 skills 用）。所以实际卡在这个点的概率很低。
+
+之所以"AI 沙箱里不能装"是硬限制，是因为沙箱和你的 Mac 之间隔着文件系统边界——不是改个判断、加个路径映射能绕过去的。
