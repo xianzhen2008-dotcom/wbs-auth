@@ -9,7 +9,7 @@
 ## 一句话版
 
 ```
-帮我装 https://github.com/xianzhen2008-dotcom/wbs-auth 。先 uname -s 看你在哪：不是 Darwin 就说明在沙箱里、别装，把 README 里那条带完整性校验的安装命令给我，我自己跑；是 Darwin 就直接装，装完跑 wbs init 把结果告诉我。别替我切账号。
+帮我装 https://github.com/xianzhen2008-dotcom/wbs-auth 。先跑 ls -d ~/Library/Application\ Support：看不到就说明你在隔离环境、别装，把 README 里那条带完整性校验的安装命令给我自己跑；看得到就直接装，装完跑 wbs init 贴结果。别替我切账号。
 ```
 
 这句包含了三件事：装什么、先判断环境、不准越界切账号。
@@ -24,74 +24,83 @@
 帮我安装 wbs auth —— 一个 WorkBuddy 双账号轮换的本地工具。
 仓库：https://github.com/xianzhen2008-dotcom/wbs-auth
 
-第一步，先确认你运行在什么环境，别急着装：
+第一步，先判断你能不能碰到我的真实文件。这比看系统名可靠：
 
-1. 执行 uname -s
-   - 结果不是 Darwin：你在我 AI 助手的沙箱里，不是我的电脑。
-     直接告诉我"我在沙箱里装不了"，然后把下面这行命令原样给我，
-     让我自己在终端里跑：
+1. 执行：ls -d "$HOME/Library/Application Support" "$HOME/.workbuddy"
+   - 两个都不存在 → 你被隔离在另一套文件系统里（Linux 容器、远程执行环境之类），
+     看不到我机器上的 WorkBuddy 登录文件，装了也用不了。
+     告诉我"我在隔离环境里"，把下面这条命令原样给我，我自己跑：
        curl -fL --retry 3 -o /tmp/wbs-install.sh https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh && tail -3 /tmp/wbs-install.sh | grep -q WBS_AUTH_INSTALLER_END && bash /tmp/wbs-install.sh
-     不要尝试绕过，不要试图映射路径，不要装到沙箱里。
-   - 结果是 Darwin：继续下一步。
+     不要试图映射路径，不要装到那个环境里。
+   - 至少一个存在 → 你就在我机器上，继续。
 
-2. 再确认能不能看到我的真实用户目录：
-   执行 ls -d "$HOME/Library/Application Support" "$HOME/.workbuddy"
-   - 两个都不存在：说明还是受限环境，同样把命令给我，别装。
-   - 至少一个存在：正常，可以装。
+   顺带看一眼 uname -s。它不是 Darwin 就同样按「被隔离」处理。
 
-3. 安装（仅当上面两步都通过）
-   执行：curl -fL --retry 3 -o /tmp/wbs-install.sh https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh && tail -3 /tmp/wbs-install.sh | grep -q WBS_AUTH_INSTALLER_END && bash /tmp/wbs-install.sh
+   注意：如果 uname 是 Darwin、上面两个目录也都存在，哪怕你有文件写入白名单、
+   禁了 ps 之类的限制，也说明是同一套文件系统，可以正常装。
 
-4. 体检
+2. 安装（仅当第 1 步通过）
+   用上面那条已经带完整性校验的命令，别自己拼 curl | bash——
+   网络断掉时管道会把半截脚本喂给 bash，装出个残缺文件还看不出原因。
+
+3. 体检
    执行：wbs init
    把完整输出贴给我，不要省略。
 
-5. 如果 init 里有任何 ✗ 或 !
+4. 如果 init 里有任何 ✗ 或 !
    - 逐条解释是什么意思
    - PATH 没生效就告诉我 source 哪个文件
    - 找不到凭证目录就告诉我先去 WorkBuddy 登录
 
-6. 告诉我下一步
+5. 告诉我下一步
 
 约束：
 - 不要替我切换账号，也不要执行 wbs / wbs -y。切换会退出 WorkBuddy，时机我自己定。
 - 不要修改 ~/.workbuddy 下的任何东西。
 - 不要读取或打印 ~/.workbuddy-accounts 里 .info 的内容，里面有凭证。
-- 不要在沙箱里"变通"安装——路径对不上，装了也是废的。
+- 不要在隔离环境里"变通"安装——文件不在那儿，装了也是废的。
 ```
 
 ---
 
-## 如果 AI 说"沙箱 Linux 环境无法安装"
+## 如果 AI 说「装不了」「我在沙箱里」
 
-这是正常现象，不是工具的问题。
+这是正常现象，不是工具的问题。但要分清它说的是哪种「隔离」：
 
-多数 AI 助手的命令执行跑在隔离容器里（Linux），和你自己的 Mac 是两个世界：
+### 两种「沙箱」，只有一种装不了
 
-- 容器里 `uname -s` 返回 `Linux`
-- 容器里没有 `~/Library/Application Support/CodeBuddyExtension`
-- 容器里装的东西，会话结束就没了
+| | macOS 进程沙箱 | Linux 容器 / 远程执行 |
+|---|---|---|
+| 例子 | WorkBuddy 桌面版里跑命令、本地 CLI 代理 | 云端 Agent、Codex 云环境、CI |
+| `uname -s` | Darwin | Linux |
+| `~` 指向 | 你的真实用户目录 | 容器里的 `/root`、`/home/user` |
+| 你的 `.info` 文件 | **看得见** | 看不见 |
+| 能不能装 | **能** | 不能 |
 
-而 `wbs` 的全部价值就是操作**你本机**那个加密的登录文件。所以：
+macOS 上的沙箱是**进程级**的：禁 `ps`、限某些命令、限制部分写入路径——但文件系统是同一套。写个文件、装个命令都没问题。
 
-**打开你自己电脑的「终端 / Terminal」，粘这一行就行：**
+Linux 容器是**文件系统隔离**：`/Users/你的名字` 根本不存在，`~` 是另一个人的 home，装进去的东西会话结束就没了。
+
+判断只需要一条：
+
+```bash
+ls -d ~/Library/Application\ Support
+```
+
+- **有输出** → 同一个文件系统，能装。哪怕 `ps` 用不了、有些路径写不进去，都不影响。
+- **报错没有这个目录** → 你在另一套文件系统里，别装了。
+
+`wbs` 的全部价值就是操作**你本机**那个加密的登录文件，文件不在这儿就无从谈起。
+
+### 确认装不了的话
+
+**打开你自己电脑的「终端 / Terminal」，粘这一行：**
 
 ```bash
 curl -fL --retry 3 -o /tmp/wbs-install.sh https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh && tail -3 /tmp/wbs-install.sh | grep -q WBS_AUTH_INSTALLER_END && bash /tmp/wbs-install.sh
 ```
 
 不需要 AI 参与，装完直接能用。想让它帮你解读输出，把结果贴回去问它。
-
-### 如果你的 AI 确实跑在本机
-
-有些配置下（比如本地 CLI 版 Claude Code、关掉沙箱的 WorkBuddy），AI 就是在你的 Mac 上执行命令。判断方法：
-
-```bash
-uname -s                              # Darwin
-ls -d ~/Library/Application\ Support   # 存在
-```
-
-两条都满足，让它装没问题。我这台就是这么装的。
 
 ---
 
@@ -152,9 +161,9 @@ WorkBuddy 账号轮换 · 环境配置
 
 | 场景 | 能不能用 |
 |---|---|
-| macOS 本机终端 | 能，唯一验证过的组合 |
-| macOS 本机 + AI 跑在本机 | 能，AI 可以直接装 |
-| macOS + AI 跑在 Linux 沙箱 | 不能。让 AI 把命令给你，自己终端跑 |
+| macOS 终端里手动跑 | 能，唯一完整验证过的组合 |
+| macOS + AI 在同一套文件系统里（含进程级沙箱） | 能。AI 能访问你的文件就行，禁 `ps`、限部分路径都不妨碍 |
+| macOS + AI 跑在 Linux 容器 / 远程环境 | 不能。让 AI 把命令给你，自己终端跑 |
 | macOS + 没装 WorkBuddy | 用不上，本工具就是给它换号的 |
 | macOS + 没有 python3 | 能。WorkBuddy 自带一个，安装脚本会自动找到并钉住 shebang |
 | Linux | 不能，凭证路径和加密后端都不同，未适配 |

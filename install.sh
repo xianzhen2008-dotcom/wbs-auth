@@ -47,8 +47,8 @@ case "$OS" in
       say "  看起来你正跑在一个容器里。"
       say ""
     fi
-    say "  ${c_yellow}如果这是 AI 助手给你的沙箱环境，那它不是你自己的电脑。${c_reset}"
-    say "  沙箱里装上了也看不到你机器上 WorkBuddy 的登录文件，切换无从谈起。"
+    say "  ${c_yellow}如果这是 AI 助手给你的执行环境，那它不是你自己的电脑。${c_reset}"
+    say "  它和你机器是两套文件系统，装上了也看不到 WorkBuddy 的登录文件。"
     say ""
     say "  请打开你自己电脑的「终端 / Terminal」，粘这一行："
     say ""
@@ -63,12 +63,12 @@ case "$OS" in
 esac
 
 # --- 确认拿到的是真实宿主环境 ---
-# 沙箱里可能 uname 也报 Darwin，但看不到凭证目录，提前说清楚比装完才发现好
+# 有些隔离环境 uname 也报 Darwin，但看不到凭证目录，提前说清楚比装完才发现好
 if [ ! -d "$HOME/Library/Application Support" ] && [ ! -d "$HOME/.workbuddy" ]; then
   warn "看不到 macOS 的用户目录（$HOME/Library/Application Support）"
   say ""
-  say "  可能是在受限沙箱里执行。请在你自己的终端里重跑，"
-  say "  或者先确认 WorkBuddy 已经在这台机器上登录过。"
+  say "  说明当前执行环境和你自己的机器不是同一套文件系统"
+  say "  （Linux 容器、远程执行环境之类）。请在你自己的终端里重跑。"
   say ""
   exit 1
 fi

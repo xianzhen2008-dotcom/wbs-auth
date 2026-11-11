@@ -75,12 +75,17 @@ curl -fL --retry 3 -o /tmp/wbs-install.sh \
 一句话，丢给 Claude Code / WorkBuddy / Cursor 就行：
 
 ```
-帮我装 https://github.com/xianzhen2008-dotcom/wbs-auth 。先 uname -s 看你在哪：不是 Darwin 就说明在沙箱里、别装，把 README 里那条带完整性校验的安装命令给我，我自己跑；是 Darwin 就直接装，装完跑 wbs init 把结果告诉我。别替我切账号。
+帮我装 https://github.com/xianzhen2008-dotcom/wbs-auth 。先跑 ls -d ~/Library/Application\ Support：看不到就说明你在隔离环境、别装，把 README 里那条带完整性校验的安装命令给我自己跑；看得到就直接装，装完跑 wbs init 贴结果。别替我切账号。
 ```
 
-> **如果 AI 说「沙箱 Linux 环境无法安装」**，那是正常现象，不是工具坏了。
-> 多数 AI 的命令执行跑在隔离容器里，容器看不到你 Mac 上的 WorkBuddy 登录文件。
-> 这时让它把命令给你，**自己在终端里粘一下**就行：
+> **如果 AI 说「装不了」「我在沙箱里」**，先分清是哪种情况：
+>
+> - **macOS 进程级沙箱**（WorkBuddy 桌面版里跑命令常见）：禁用 `ps`、限制部分路径写入，但文件系统和你是同一套，**能装**。
+> - **Linux 容器 / 远程执行环境**：`~` 是另一个人的 home，`/Users/你的名字` 根本不存在，**装不了**。
+>
+> 一条命令就能判断：`ls -d ~/Library/Application\ Support`。有输出就能装，报错就没有。
+>
+> 确认是后者的话，让它把命令给你，**自己在终端里粘一下**：
 >
 > ```bash
 > curl -fL --retry 3 -o /tmp/wbs-install.sh https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh && tail -3 /tmp/wbs-install.sh | grep -q WBS_AUTH_INSTALLER_END && bash /tmp/wbs-install.sh
