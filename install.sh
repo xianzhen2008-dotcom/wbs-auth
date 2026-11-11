@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # wbs auth — 一键安装
 #
-#   curl -fsSL https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh | bash
+#   curl -fL --retry 3 -o /tmp/wbs-install.sh \
+#     https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh \
+#     && bash /tmp/wbs-install.sh
 #
 # 也支持本地安装：
 #   ./install.sh
@@ -45,7 +47,8 @@ case "$OS" in
     say ""
     say "  请打开你自己电脑的「终端 / Terminal」，粘这一行："
     say ""
-    say "    ${c_dim}curl -fsSL $REPO_RAW/install.sh | bash${c_reset}"
+    say "    ${c_dim}curl -fL --retry 3 -o /tmp/wbs-install.sh $REPO_RAW/install.sh${c_reset}"
+    say "    ${c_dim}bash /tmp/wbs-install.sh${c_reset}"
     say ""
     say "  如果你本来就在 Linux 或 Windows 上，那确实不支持——"
     say "  凭证路径和加密方式都不一样，需要另行适配，不是加个判断就能跑。"
@@ -135,17 +138,46 @@ if [ -n "$SELF_DIR" ] && [ -f "$SELF_DIR/wbs" ]; then
   cp "$SELF_DIR/wbs" "$TMP"
   ok "使用本地 wbs"
 else
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$REPO_RAW/wbs" -o "$TMP" || die "下载失败：$REPO_RAW/wbs"
-  elif command -v wget >/dev/null 2>&1; then
-    wget -qO "$TMP" "$REPO_RAW/wbs" || die "下载失败：$REPO_RAW/wbs"
-  else
-    die "没有 curl 也没有 wget"
+  # raw.githubusercontent.com 在国内经常超时，准备几个源逐个试
+  SOURCES="$REPO_RAW"
+  if [ -z "${WBS_AUTH_RAW:-}" ]; then
+    SOURCES="$SOURCES
+https://cdn.jsdelivr.net/gh/xianzhen2008-dotcom/wbs-auth@main
+https://raw.gitmirror.com/xianzhen2008-dotcom/wbs-auth/main"
   fi
+
+  GOT=0
+  while IFS= read -r src || [ -n "$src" ]; do
+    [ -n "$src" ] || continue
+    say "${c_dim}  下载 $src/wbs${c_reset}"
+    if command -v curl >/dev/null 2>&1; then
+      if curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 \
+              "$src/wbs" -o "$TMP" 2>/dev/null && [ -s "$TMP" ]; then
+        GOT=1
+      fi
+    elif command -v wget >/dev/null 2>&1; then
+      if wget -q --tries=3 --timeout=15 -O "$TMP" "$src/wbs" 2>/dev/null && [ -s "$TMP" ]; then
+        GOT=1
+      fi
+    else
+      die "没有 curl 也没有 wget"
+    fi
+    if [ "$GOT" = "1" ]; then
+      break
+    fi
+    warn "这个源不通，换下一个"
+  done <<EOF
+$SOURCES
+EOF
+
+  [ "$GOT" = "1" ] || die "所有下载源都失败了。检查网络，或用 WBS_AUTH_RAW 指定镜像。"
   ok "已下载 wbs"
 fi
 
-# --- 语法自检，别装个坏文件进去 ---
+# --- 校验，别把半截文件或别的什么东西装进去 ---
+grep -q "wbs auth" "$TMP" 2>/dev/null && grep -q "__version__" "$TMP" 2>/dev/null \
+  || die "下载到的内容不完整（可能网络中断）。重跑一次试试。"
+
 "$PY" -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$TMP" \
   || die "下载到的 wbs 语法有问题，可能被改坏了"
 

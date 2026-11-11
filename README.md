@@ -53,10 +53,22 @@ WorkBuddy 把当前登录会话加密存在一个文件里：
 ### 方式一：一行命令
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh | bash
+curl -fL --retry 3 --connect-timeout 15 -o /tmp/wbs-install.sh \
+  https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh \
+  && bash /tmp/wbs-install.sh
 ```
 
-装到 `~/.local/bin/wbs`，顺带建 `wbs-auth` 别名，并自动跑一次环境检查。
+> **别用 `curl ... | bash`。** 网络抖一下，管道会把半截脚本喂给 bash，结果是几行 `syntax error` 加一个装了一半的残缺文件，还特别难看出发生了什么。先落盘、再执行，就没有这个问题。
+
+国内访问 raw 常超时，换这个源：
+
+```bash
+curl -fL --retry 3 -o /tmp/wbs-install.sh \
+  https://cdn.jsdelivr.net/gh/xianzhen2008-dotcom/wbs-auth@main/install.sh \
+  && bash /tmp/wbs-install.sh
+```
+
+装到 `~/.local/bin/wbs`，顺带建 `wbs-auth` 别名，并自动跑一次环境检查。脚本内部下载主程序时也会在 raw 不通时自动切备用源。
 
 ### 方式二：让 AI 帮你装
 
@@ -71,7 +83,7 @@ curl -fsSL https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/i
 > 这时让它把命令给你，**自己在终端里粘一下**就行：
 >
 > ```bash
-> curl -fsSL https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh | bash
+> curl -fL --retry 3 -o /tmp/wbs-install.sh https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh && bash /tmp/wbs-install.sh
 > ```
 >
 > 详细说明见 [`prompts/install.md`](prompts/install.md)，里面有沙箱环境的排查步骤。
@@ -217,19 +229,28 @@ WorkBuddy 没登录，或者装在了非标准位置。先在 WorkBuddy 里登�
 
 **运行 `wbs` 弹出一堆 `xcode-select: note: No developer tools were found`？**
 
-安装时装到了系统那个「假」python3（`/usr/bin/python3` 只是个壳，没装 Xcode 命令行工具时跑起来就弹这个）。重跑一次安装就会自动修好：
+安装时装到了系统那个「假」python3（`/usr/bin/python3` 只是个壳，没装 Xcode 命令行工具时跑起来就弹这个）。**不用联网也不用重装**，把第一行的解释器改掉就行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh | bash
-```
-
-或者手动把解释器钉死：
-
-```bash
-PY=$(ls -d ~/.workbuddy/binaries/python/versions/*/bin/python3 2>/dev/null | tail -1)
-[ -n "$PY" ] && sed -i '' "1s|.*|#!$PY|" ~/.local/bin/wbs
+sed -i.bak "1s|.*|#!$(ls -d ~/.workbuddy/binaries/python/versions/*/bin/python3 | tail -1)|" ~/.local/bin/wbs
 wbs --version
 ```
+
+或者重跑一次安装，会自动修好。
+
+**`curl: (56) Recv failure` 或者 `bash: syntax error: unexpected end of file`？**
+
+网络把下载掐断了。`curl | bash` 这种写法会把半截脚本直接喂给 bash——前半段已经执行了（所以你能看到「✓ python3」），后半段没了就报 `unexpected end of file`。
+
+改用先落盘再执行，并且重跑一次把残缺文件覆盖掉：
+
+```bash
+curl -fL --retry 3 --connect-timeout 15 -o /tmp/wbs-install.sh \
+  https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh \
+  && bash /tmp/wbs-install.sh
+```
+
+如果 `wbs` 命令已经坏了，上面那条 `sed` 也能先救回来。
 
 **会不会影响公司电脑的合规监控？**
 

@@ -30,7 +30,7 @@
    - 结果不是 Darwin：你在我 AI 助手的沙箱里，不是我的电脑。
      直接告诉我"我在沙箱里装不了"，然后把下面这行命令原样给我，
      让我自己在终端里跑：
-       curl -fsSL https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh | bash
+       curl -fL --retry 3 -o /tmp/wbs-install.sh https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh && bash /tmp/wbs-install.sh
      不要尝试绕过，不要试图映射路径，不要装到沙箱里。
    - 结果是 Darwin：继续下一步。
 
@@ -40,7 +40,7 @@
    - 至少一个存在：正常，可以装。
 
 3. 安装（仅当上面两步都通过）
-   执行：curl -fsSL https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh | bash
+   执行：curl -fL --retry 3 -o /tmp/wbs-install.sh https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh && bash /tmp/wbs-install.sh
 
 4. 体检
    执行：wbs init
@@ -77,7 +77,7 @@
 **打开你自己电脑的「终端 / Terminal」，粘这一行就行：**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh | bash
+curl -fL --retry 3 -o /tmp/wbs-install.sh https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main/install.sh && bash /tmp/wbs-install.sh
 ```
 
 不需要 AI 参与，装完直接能用。想让它帮你解读输出，把结果贴回去问它。
