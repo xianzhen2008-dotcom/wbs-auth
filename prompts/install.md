@@ -9,10 +9,14 @@
 ## 一句话版
 
 ```
-帮我装 https://github.com/xianzhen2008-dotcom/wbs-auth 。先跑 ls -d ~/Library/Application\ Support：看不到就说明你在隔离环境、别装，把 README 里那条带完整性校验的安装命令给我自己跑；看得到就直接装，装完跑 wbs init 贴结果。别替我切账号。
+装一下 https://github.com/xianzhen2008-dotcom/wbs-auth ，照 README 来，装完把 wbs init 的结果给我，别替我切账号。
 ```
 
-这句包含了三件事：装什么、先判断环境、不准越界切账号。
+就这一句。怎么装、什么环境能装、坏了怎么修，README 里都写了，AI 读一遍就知道。
+
+判断能不能装只有一条：`ls -d ~/Library/"Application Support"`。有输出就能装，报错就是隔离容器。
+
+> **用过旧提示词、被劝退过的**：如果之前得到的结论是「沙箱环境装不了」，那多半是判断错了。README 的「让 AI 帮你装」里有纠偏说明，让它重读一遍再判断。
 
 ---
 
