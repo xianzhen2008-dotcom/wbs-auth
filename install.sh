@@ -35,16 +35,39 @@ case "$(uname -s)" in
 esac
 
 # --- Python ---
-PY=""
-for cand in python3 /usr/bin/python3 /opt/homebrew/bin/python3; do
-  if command -v "$cand" >/dev/null 2>&1; then
-    if "$cand" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' 2>/dev/null; then
-      PY="$cand"; break
+# 依次找工作 python3、系统 python3、Homebrew、WorkBuddy 自带的那个
+find_python() {
+  local c
+  for c in \
+    "$(command -v python3 2>/dev/null)" \
+    /usr/bin/python3 \
+    /opt/homebrew/bin/python3 \
+    /usr/local/bin/python3 \
+    "$HOME"/.workbuddy/binaries/python/versions/*/bin/python3 \
+    "$HOME"/.local/bin/python3
+  do
+    [ -n "$c" ] && [ -x "$c" ] || continue
+    if "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' 2>/dev/null; then
+      printf '%s' "$c"
+      return 0
     fi
-  fi
-done
-[ -n "$PY" ] || die "需要 python3 ≥ 3.8。装一下：brew install python"
-ok "python3 $("$PY" -c 'import platform;print(platform.python_version())')"
+  done
+  return 1
+}
+
+PY="$(find_python)" || true
+if [ -z "$PY" ]; then
+  warn "没找到 python3 ≥ 3.8"
+  say ""
+  say "  装一个再回来跑这条命令，任选其一："
+  say "    ${c_dim}xcode-select --install${c_reset}      （系统自带，最省事）"
+  say "    ${c_dim}brew install python${c_reset}          （有 Homebrew）"
+  say ""
+  say "  装了 WorkBuddy 的机器通常在 ~/.workbuddy/binaries/python 下自带一个，"
+  say "  检查一下这个目录是否被清过。"
+  exit 1
+fi
+ok "python3 $("$PY" -c 'import platform;print(platform.python_version())')  ${c_dim}$PY${c_reset}"
 
 # --- 取脚本 ---
 mkdir -p "$BIN_DIR"
@@ -73,6 +96,20 @@ fi
 # --- 语法自检，别装个坏文件进去 ---
 "$PY" -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$TMP" \
   || die "下载到的 wbs 语法有问题，可能被改坏了"
+
+# PATH 里没有 python3 时，把 shebang 钉成刚找到的绝对路径，否则 wbs 跑不起来
+if ! command -v python3 >/dev/null 2>&1; then
+  "$PY" - "$TMP" "$PY" <<'PYEOF'
+import sys
+path, py = sys.argv[1], sys.argv[2]
+src = open(path, encoding="utf-8").read()
+if src.startswith("#!"):
+    head, rest = src.split("\n", 1)
+    src = f"#!{py}\n{rest}"
+    open(path, "w", encoding="utf-8").write(src)
+PYEOF
+  ok "已把解释器钉到 $PY"
+fi
 
 # --- 安装 ---
 if [ -f "$TARGET" ] && ! head -30 "$TARGET" 2>/dev/null | grep -q "wbs"; then
