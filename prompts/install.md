@@ -144,7 +144,7 @@ WorkBuddy 账号轮换 · 环境配置
 - 切换必须等 WorkBuddy 完全退出，否则退出时内存会话会写回覆盖。
   工具内部已经处理了这个等待，所以不需要你额外做什么。
 - 快照在 ~/.workbuddy-accounts/snapshots/<名字>/，权限 700。
-- 命令：wbs（轮换）/ wbs st（状态）/ wbs s（存当前号）/ wbs init（体检）/ wbs h（详细说明）
+- 命令：wbs（轮换）/ wbs st（状态）/ wbs s（存当前号）/ wbs init（体检）/ wbs up（升级）/ wbs h（详细说明）
 
 环境上的注意事项：
 
