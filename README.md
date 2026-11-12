@@ -1,5 +1,11 @@
 # wbs auth
 
+![version](https://img.shields.io/badge/version-1.2.1-blue)
+![platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![python](https://img.shields.io/badge/python-3.8%2B-yellow)
+![deps](https://img.shields.io/badge/dependencies-none-brightgreen)
+![license](https://img.shields.io/badge/license-MIT-green)
+
 > WorkBuddy 双账号一键轮换。个人号和企业号来回切，不用重新扫码登录。
 
 ```bash
