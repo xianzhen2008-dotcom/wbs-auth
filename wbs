@@ -17,7 +17,7 @@ WorkBuddy 的登录会话加密存在
 wbs auth 和 wbs 等价，两种写法都行。
 """
 
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 
 # 检查更新 / 自升级用的源，可用 WBS_AUTH_RAW 覆盖
 DEFAULT_SOURCES = [
@@ -652,79 +652,145 @@ def show_list():
 
 # ---------- 详细说明 ----------
 HELP_TEXT = """
-{b}wbs — WorkBuddy 账号轮换{/}
+{b}wbs auth{/}  —  WorkBuddy 账号轮换 · account switcher
 
-  WorkBuddy 同一时刻只保留一个账号的登录态。这个工具把每个号的登录态各存
-  一份，用一条命令来回换，不用每次重新扫码或输密码。
+{b}它解决什么 · What it solves{/}
 
-{b}为什么不用重新登录{/}
+  WorkBuddy 同一时刻只保留一个账号的登录态。有两个号的人每天要登出、扫码、
+  等加载。这个工具把每个号的登录态各存一份，用一条命令换过来，token 继续有效。
 
-  WorkBuddy 把会话（accessToken / refreshToken）加密存在
+  WorkBuddy keeps only one signed-in account at a time. Switching normally
+  means signing out and scanning the QR code again. This tool stores each
+  account's session separately and swaps the file, so the token stays valid
+  and no re-login is needed.
+
+{b}为什么能免密 · Why no re-login{/}
+
+  登录会话加密存在
     {authdir}
-  加密用的主密钥在
-    {keyblob}
-  同一台机器上所有号共用这一把锁。所以把备份的文件换回去，token 立刻
-  就能用——本质是换文件，不是伪造登录。
+  加密主密钥在 {keyblob}，同一台机器上所有账号共用同一把。
+  所以「还原备份文件」就等于「还原登录态」——换文件，不是伪造登录。
 
-{b}命令{/}
+  The session file above is encrypted with a master key stored in keyblob,
+  shared by every account on this machine. Restoring a backup file is
+  therefore equivalent to restoring the login state. No token is forged.
 
-  {c}wbs{/}              切到另一个号，切完自动打开 WorkBuddy
-  {c}wbs -y{/}           同上，不问直接切
-  {c}wbs -n{/}           只演练，看清会切成什么，不动手
-  {c}wbs -s{/}           切完不自动打开，留给自己手动开
-  {c}wbs st{/}           现在哪个号、续登还剩几天
-  {c}wbs ls{/}           已保存的号
-  {c}wbs s [名字]{/}     把当前号存下来（不给名字就按套餐自动起名）
-  {c}wbs u <名字>{/}     直接跳到某个号，不按顺序
-  {c}wbs rm <名字>{/}    删掉某个号
-  {c}wbs init{/}         体检 + 自动配置，换新电脑先跑这个
-  {c}wbs up{/}           检查并升级到最新版（{c}-n{/} 只看不升）
-  {c}wbs h{/}            这份说明
+{b}命令 · Commands{/}
 
-  名字可以只打前缀，比如 {c}wbs u per{/} 就够。
+  {c}wbs{/}
+    切到下一个号，切完自动打开 WorkBuddy；存了三个以上按名字顺序循环。
+    Rotate to the next account and relaunch WorkBuddy. With three or more
+    saved accounts it cycles in name order.
 
-{b}第一次怎么配{/}
+  {c}wbs -y{/}
+    同上，不问直接切。确定要换、或写在脚本里时用。
+    Same, skipping the confirmation prompt.
 
-  1. 正常登录个人号，终端跑 {c}wbs s{/}        → 存成 personal
-  2. 在 WorkBuddy 里登出，登录企业号
-  3. 再跑 {c}wbs{/}                              → 自动记住企业号，且不会把你弹回去
-  4. 之后 {c}wbs{/} 就是来回切
+  {c}wbs -n{/}
+    演练：只显示会从哪个号切到哪个号，不做任何修改。
+    Dry run: shows what would change and changes nothing.
 
-  第 3 步之所以不切走，是因为你刚登进来，直接弹回去很别扭。再跑一次才轮到轮换。
+  {c}wbs -s{/}
+    切完不自动打开 WorkBuddy，留给自己手动开。
+    Switch without relaunching the app.
 
-{b}每天怎么用{/}
+  {c}wbs st{/}   status
+    当前是哪个号、续登凭证还剩几天、已存了哪些号、有没有新版本。
+    Show the current account, session lifetime, saved accounts, and whether
+    a newer version exists.
 
-  {c}wbs{/}         换个号
-  {c}wbs -y{/}      连确认都不要，一条命令到底
+  {c}wbs ls{/}   list
+    列出所有已保存的号，前面的圆点 ● 是当前在用的那个。
+    List saved accounts; the dot marks the one currently in use.
 
-  存了三个号以上，wbs 按名字的字母顺序循环；想跳着切用 {c}wbs u <名字>{/}。
+  {c}wbs s [名字]{/}   save
+    把当前登录的号存成一份快照。不给名字就按套餐自动命名（personal /
+    ultimate）。同一个号重复保存会复用原来的名字，不会存出第二份。
+    Save the signed-in account as a snapshot. Without a name it is derived
+    from the plan. Re-saving the same account reuses the existing name.
 
-{b}换新电脑{/}
+  {c}wbs u <名字>{/}   use
+    切到指定的号，不按顺序。名字可以只打前缀，wbs u per 就够了。
+    Switch to a named account, ignoring the rotation order. Prefix matching
+    works.
 
-  把 {c}~/.workbuddy-accounts{/} 整个拷过去，然后
-    {c}wbs init{/}    自动找凭证、认账号、建仓库
-    {c}wbs -y{/}      开始切
+  {c}wbs rm <名字>{/}
+    删掉一份快照，不影响当前登录状态。
+    Remove a snapshot. Does not affect the current session.
 
-{b}几个要注意的{/}
+  {c}wbs rename <旧> <新>{/}
+    改名。名字决定轮换顺序，改名会改变循环次序。
+    Rename a snapshot. Names define the rotation order.
 
-  · 切换会退出 WorkBuddy，正在跑的对话会断。
-  · 必须等它完全退出再换文件，否则它退出时会把内存里的旧会话写回去，
-    白切一次。工具已经处理了这个等待。
-  · 快照里是加密过的 token，但能被别人直接拿去用。仓库权限设成 700，
-    别拷给别人、别丢公共目录。
-  · 快照的续登凭证一般 60 天有效，{c}wbs st{/} 里能看到剩几天。过期了切
-    回去要重新登录，重新登录后跑一次 {c}wbs s{/} 刷新。
+  {c}wbs init{/}
+    环境体检：找凭证目录、识别当前账号、建快照仓库、检查 PATH 与续登时效，
+    最后自动把当前号存一份。
+    Health check: locates the credential directory, identifies the current
+    account, creates the snapshot store, verifies PATH and session lifetime,
+    then saves the current account.
 
-{b}文件在哪{/}
+  {c}wbs up{/}   upgrade
+    检查并升级到最新版，-n 只检查不升级。升级会保留已经钉好的解释器路径，
+    旧版本留成 wbs.bak。
+    Check for and install updates; -n only checks. A pinned interpreter path
+    is preserved and the previous version is kept as wbs.bak.
 
-  凭证    {authdir}
-  快照    {snapdir}
-  主密钥  {keyblob}
+  {c}wbs h{/}   help
+    这份说明。wbs -h、wbs --help、wbs help 都等同。
+    This page. Same as wbs -h / wbs --help / wbs help.
+
+{b}第一次怎么配 · First run{/}
+
+  1. 登录第一个号，跑 {c}wbs s{/}
+  2. 在 WorkBuddy 里登出，登录第二个号
+  3. 再跑 {c}wbs{/} —— 它会记住新号，但不会立刻把你弹回去
+  4. 之后再跑 {c}wbs{/} 就开始来回切了
+
+  1. Sign in to the first account, run wbs s
+  2. Sign out, then sign in to the second one
+  3. Run wbs — it records the new account and stops there
+  4. Run wbs once more to start switching
+
+{b}几个必须知道的 · Things to know{/}
+
+  · 切换会退出 WorkBuddy，正在跑的对话会中断。
+    Switching quits WorkBuddy; a running conversation is interrupted.
+
+  · 必须等它完全退出再换文件，否则退出时内存里的会话会写回覆盖。工具已处理。
+    The app must be fully quit first, otherwise it writes the in-memory
+    session back on exit and undoes the switch. Handled internally.
+
+  · 快照里是加密 token，同机可用，别外传。仓库权限已设为 700。
+    Snapshots hold encrypted tokens usable on this machine. Do not share.
+
+  · 快照绑死在本机主密钥，换电脑要重新登录，光拷快照没用。
+    Snapshots are bound to the local master key; a new machine needs a
+    fresh sign-in, copying the snapshots is not enough.
+
+  · 续登凭证一般 60 天过期，wbs st 会显示剩余天数。
+    The refresh token lasts about 60 days; wbs st shows the countdown.
+
+  · 只支持 macOS。Linux / Windows 的凭证路径与加密方式都不同，未适配。
+    macOS only. Linux and Windows store credentials differently.
+
+{b}文件在哪 · Files{/}
+
+  凭证  {authdir}
+  快照  {snapdir}
+  密钥  {keyblob}
+
+{b}作者 · Author{/}
+
+  @xianzhen2008-dotcom
+  https://github.com/xianzhen2008-dotcom/wbs-auth
+
+  MIT License. 非官方工具，与腾讯 / WorkBuddy 无关联。
+  Unofficial tool. Not affiliated with Tencent or WorkBuddy.
 """
 
 
 def show_help():
-    t = HELP_TEXT
+    t = HELP_TEXT.lstrip("\n")
     t = t.replace("{b}", "\033[1m" if _TTY else "")
     t = t.replace("{/}", "\033[0m" if _TTY else "")
     t = t.replace("{c}", "\033[36m" if _TTY else "")
@@ -1059,6 +1125,8 @@ def main():
     # 支持 `wbs auth ...` 与 `wbs ...` 两种写法
     if argv and argv[0] == "auth":
         argv = argv[1:]
+    # 手滑写成 -help / -Help 的，当 -h 处理（否则会被拆成 -h + -elp）
+    argv = ["-h" if a in ("-help", "-Help", "--h", "-hlp") else a for a in argv]
 
     ap = argparse.ArgumentParser(
         prog="wbs",
@@ -1101,7 +1169,7 @@ def main():
     args = ap.parse_args(argv)
 
     if args.help:
-        print(__doc__.strip())
+        show_help()
         return
 
     if args.cmd is None:
