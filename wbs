@@ -324,13 +324,35 @@ def host_of(url):
     return m.group(1) if m else (url or "")
 
 
+REPO_API = "https://api.github.com/repos/xianzhen2008-dotcom/wbs-auth/commits/main"
+
+
+def resolve_ref(timeout=4):
+    """取 main 的最新 commit sha。用 sha 拉 raw 能绕开 CDN 的旧缓存，
+    否则刚发布的版本可能几分钟到几小时内还拿不到。"""
+    try:
+        req = urllib.request.Request(
+            REPO_API,
+            headers={"User-Agent": f"wbs-auth/{__version__}",
+                     "Accept": "application/vnd.github+json"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8")).get("sha")
+    except (urllib.error.URLError, OSError, ValueError, TypeError):
+        return None
+
+
 def fetch_script(timeout=6, first_only=False):
     """拉远端 wbs 全文，返回 (text, source)；失败返回 (None, 原因)。"""
+    ref = resolve_ref(timeout=min(timeout, 4))
     last = "没有可用源"
     for src in raw_sources():
+        url = f"{src}/wbs"
+        if ref and src.startswith("https://raw.githubusercontent.com/"):
+            url = f"{src.rsplit('/', 1)[0]}/{ref}/wbs"
         try:
             req = urllib.request.Request(
-                f"{src}/wbs",
+                url,
                 headers={"User-Agent": f"wbs-auth/{__version__}"},
             )
             with urllib.request.urlopen(req, timeout=timeout) as r:
