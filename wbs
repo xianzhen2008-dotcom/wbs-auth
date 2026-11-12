@@ -12,19 +12,30 @@ WorkBuddy 的登录会话加密存在
   wbs st         当前是哪个号
   wbs h          详细说明
   wbs init       新机器首次配置
+  wbs up         检查并升级
 
 wbs auth 和 wbs 等价，两种写法都行。
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
+
+# 检查更新 / 自升级用的源，可用 WBS_AUTH_RAW 覆盖
+DEFAULT_SOURCES = [
+    "https://raw.githubusercontent.com/xianzhen2008-dotcom/wbs-auth/main",
+    "https://cdn.jsdelivr.net/gh/xianzhen2008-dotcom/wbs-auth@main",
+]
 
 import argparse
+import ast
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -291,6 +302,151 @@ def app_installed():
     return Path(f"/Applications/{APP_NAME}.app").exists()
 
 
+# ---------- 版本 ----------
+def raw_sources():
+    env = os.environ.get("WBS_AUTH_RAW")
+    if env:
+        return [env]
+    return list(DEFAULT_SOURCES)
+
+
+def version_of(text):
+    m = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', text, re.M)
+    return m.group(1) if m else None
+
+
+def vtuple(v):
+    return tuple(int(x) for x in re.findall(r"\d+", v or "0"))
+
+
+def host_of(url):
+    m = re.match(r"https?://([^/]+)", url or "")
+    return m.group(1) if m else (url or "")
+
+
+def fetch_script(timeout=6, first_only=False):
+    """拉远端 wbs 全文，返回 (text, source)；失败返回 (None, 原因)。"""
+    last = "没有可用源"
+    for src in raw_sources():
+        try:
+            req = urllib.request.Request(
+                f"{src}/wbs",
+                headers={"User-Agent": f"wbs-auth/{__version__}"},
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                text = r.read().decode("utf-8", "replace")
+            if version_of(text):
+                return text, src
+            last = "下载内容不像 wbs"
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            last = str(e)
+        if first_only:
+            break
+    return None, last
+
+
+def check_cache_path():
+    return STORE_DIR / ".update-check.json"
+
+
+def remote_version(max_age=86400, timeout=2, first_only=False):
+    """优先读缓存，过期才联网。任何失败都返回 (None, None)，绝不抛。"""
+    p = check_cache_path()
+    now = time.time()
+    if max_age and p.exists():
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+            if now - float(d.get("ts", 0)) < max_age:
+                return d.get("version"), d.get("source")
+        except (OSError, ValueError, TypeError):
+            pass
+    text, src = fetch_script(timeout=timeout, first_only=first_only)
+    v = version_of(text) if text else None
+    # 失败也缓存，否则每次 st 都要白等一个超时
+    try:
+        ensure_store()
+        p.write_text(json.dumps({"ts": now, "version": v,
+                                 "source": src if text else None}),
+                     encoding="utf-8")
+    except OSError:
+        pass
+    return v, src
+
+
+def self_path():
+    """当前正在运行的脚本真实路径（软链会解析到目标文件）。"""
+    return Path(__file__).resolve()
+
+
+def cmd_upgrade(check_only=False):
+    cur = __version__
+    print()
+    print(f"  当前  {bold(cur)}")
+
+    text, src = fetch_script(timeout=6)
+    if not text:
+        print(red("  连不上更新源"))
+        print(dim(f"  {src}"))
+        print()
+        print(dim("  网络或代理问题，稍后再试。也可以重跑安装脚本升级。"))
+        print()
+        return 1
+
+    remote = version_of(text)
+    newer = vtuple(remote) > vtuple(cur)
+    print(f"  最新  {cyan(remote)}  " + dim(host_of(src)))
+    print()
+
+    if not newer:
+        print(green("✓ ") + "已是最新，不用动")
+        print()
+        return 0
+
+    if check_only:
+        print(f"  有新版本，跑 {cyan('wbs up')} 升级")
+        print()
+        return 0
+
+    try:
+        ast.parse(text)
+    except SyntaxError as e:
+        fail(f"下载到的版本语法有问题，不敢装：{e}")
+
+    target = self_path()
+    tmp = target.parent / f".{target.name}.new"
+
+    # 已经钉死解释器路径的，升级后继续钉着，别又弹 xcode-select
+    try:
+        first = target.read_text(encoding="utf-8").split("\n", 1)[0]
+    except OSError:
+        first = ""
+    if first.startswith("#!") and "env python3" not in first:
+        text = first + "\n" + text.split("\n", 1)[1]
+
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.chmod(tmp, 0o755)
+        if target.exists():
+            shutil.copy2(target, str(target) + ".bak")
+        os.replace(tmp, target)
+    except OSError as e:
+        fail(f"写入失败：{e}")
+
+    try:
+        ensure_store()
+        check_cache_path().write_text(
+            json.dumps({"ts": time.time(), "version": remote, "source": src}),
+            encoding="utf-8")
+    except OSError:
+        pass
+
+    print(green("✓ ") + f"已升级 {cur} → {bold(remote)}")
+    print(dim(f"  {target}"))
+    print(dim("  下次运行 wbs 生效"))
+    print()
+    return 0
+
+
 # ---------- 快照仓库 ----------
 def mkd(p):
     """建目录。先判断再建，避开某些环境下 exist_ok 失效的问题。"""
@@ -447,6 +603,13 @@ def show_status():
         print(dim("还没存过号。跑一次 wbs 就会自动记住当前号。"))
     else:
         print(dim("另一个号还没存。切过去登录一次，跑 wbs 会自动记住。"))
+
+    rv, _ = remote_version(timeout=1.0, first_only=True)
+    line = f"版本  {__version__}"
+    if rv and vtuple(rv) > vtuple(__version__):
+        print(line + "  " + yellow(f"→ {rv} 可升级，跑 wbs up"))
+    else:
+        print(dim(line))
     print()
 
 
@@ -493,6 +656,7 @@ HELP_TEXT = """
   {c}wbs u <名字>{/}     直接跳到某个号，不按顺序
   {c}wbs rm <名字>{/}    删掉某个号
   {c}wbs init{/}         体检 + 自动配置，换新电脑先跑这个
+  {c}wbs up{/}           检查并升级到最新版（{c}-n{/} 只看不升）
   {c}wbs h{/}            这份说明
 
   名字可以只打前缀，比如 {c}wbs u per{/} 就够。
@@ -893,6 +1057,8 @@ def main():
     sub.add_parser("ls", aliases=["list"], add_help=False, help="已保存的账号")
     sub.add_parser("h", aliases=["help"], add_help=False, help="详细说明")
     sub.add_parser("init", add_help=False, help="体检并自动配置")
+    p_up = sub.add_parser("up", aliases=["upgrade"], add_help=False, help="检查并升级")
+    p_up.add_argument("-n", "--check", action="store_true")
 
     p_save = sub.add_parser("s", aliases=["save"], add_help=False, help="保存当前账号")
     p_save.add_argument("name", nargs="?")
@@ -929,6 +1095,8 @@ def main():
         show_help()
     elif args.cmd == "init":
         cmd_init()
+    elif args.cmd in ("up", "upgrade"):
+        sys.exit(cmd_upgrade(args.check))
     elif args.cmd in ("s", "save"):
         do_save(args.name)
     elif args.cmd in ("u", "use"):
