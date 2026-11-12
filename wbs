@@ -16,7 +16,7 @@ WorkBuddy 的登录会话加密存在
 wbs auth 和 wbs 等价，两种写法都行。
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 import argparse
 import json
@@ -490,7 +490,7 @@ HELP_TEXT = """
   {c}wbs st{/}           现在哪个号、续登还剩几天
   {c}wbs ls{/}           已保存的号
   {c}wbs s [名字]{/}     把当前号存下来（不给名字就按套餐自动起名）
-  {c}wbs u <名字>{/}     切到指定号（超过两个号时用）
+  {c}wbs u <名字>{/}     直接跳到某个号，不按顺序
   {c}wbs rm <名字>{/}    删掉某个号
   {c}wbs init{/}         体检 + 自动配置，换新电脑先跑这个
   {c}wbs h{/}            这份说明
@@ -510,6 +510,8 @@ HELP_TEXT = """
 
   {c}wbs{/}         换个号
   {c}wbs -y{/}      连确认都不要，一条命令到底
+
+  存了三个号以上，wbs 按名字的字母顺序循环；想跳着切用 {c}wbs u <名字>{/}。
 
 {b}换新电脑{/}
 
@@ -700,16 +702,17 @@ def cmd_toggle(assume_yes=False, dry_run=False, restart=True, channel=None):
         return
 
     if just_learned:
-        print(dim(f"  两个号都记好了，再跑 wbs 就切到 {describe(others[0])}"))
+        print(dim(f"  记好了，再跑 wbs 就切到 {describe(others[0])}"))
         print()
         return
 
-    if len(others) > 1:
-        print(yellow(f"另一个号存了多个快照：{', '.join(s['name'] for s in others)}"))
-        print(dim("  用 wbs u <名字> 指定切哪个。"))
-        return
+    # 按名字排序，顺序稳定可预期；两个号时就是来回切，三个以上按顺序循环
+    ordered = sorted(snaps, key=lambda s: s["name"].lower())
+    total = len(ordered)
+    idx = next((k for k, s in enumerate(ordered) if s.get("uid") == cur["uid"]), 0)
+    target = ordered[(idx + 1) % total]
 
-    do_switch(others[0]["name"], assume_yes, restart, channel, dry_run)
+    do_switch(target["name"], assume_yes, restart, channel, dry_run)
 
 
 # ---------- 初始化 ----------
@@ -828,8 +831,11 @@ def cmd_init(silent_if_ready=False):
         print(f"  跑 {cyan('wbs')} 切到 {describe(others[0])}")
         print(dim("  两个号都在了，以后 wbs 就是来回切。"))
     elif len(others) > 1:
-        print(f"  已存 {len(others)} 个其他号，用 {cyan('wbs u <名字>')} 指定")
-        print(dim(f"  {', '.join(s['name'] for s in others)}"))
+        ordered = sorted(snaps, key=lambda s: s["name"].lower())
+        chain = " → ".join(s["name"] for s in ordered)
+        print(f"  已存 {len(ordered)} 个号，wbs 按这个名字顺序循环：")
+        print("  " + cyan(chain) + dim(" → 回到第一个"))
+        print(dim(f"  想跳过顺序直接用 {cyan('wbs u <名字>')}"))
     else:
         print(f"  1. 在 WorkBuddy 里登出，登录另一个号")
         print(f"  2. 回来跑 {cyan('wbs')}  " + dim("它会自动记住，不会把你弹回去"))
